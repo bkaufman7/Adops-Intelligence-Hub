@@ -1,0 +1,17 @@
+{
+  "name": "adops-intelligence-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project 4 - AdOps Intelligence Hub (Google Apps Script via CLASP)",
+  "scripts": {
+    "clasp:login": "clasp login",
+    "clasp:pull": "clasp pull",
+    "clasp:push": "clasp push",
+    "clasp:open": "clasp open",
+    "deploy": "clasp push",
+    "logs": "clasp logs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.5.0"
+  }
+}
