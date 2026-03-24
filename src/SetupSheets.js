@@ -41,6 +41,8 @@ function seedConfigSheet_() {
     [CONFIG_KEYS.AUDIT_EXPORT_FOLDER_ID, '1p3FNU2d4k8eARuPAr6Fhy1c0Y3UYQDzZ', 'Root Drive folder ID for Hub exports; app auto-creates organized subfolders'],
     [CONFIG_KEYS.MAPPING_SOURCE_SPREADSHEET_ID, '1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o', 'Project 3/EOM mapping spreadsheet ID'],
     [CONFIG_KEYS.MAPPING_SOURCE_TAB, 'Networks', 'Project 3 mapping tab name'],
+    [CONFIG_KEYS.CVI_BASELINE_TAB, 'Data', 'Daily CVI Catch reference tab containing all live placements'],
+    [CONFIG_KEYS.CVI_BASELINE_RETENTION_DAYS, '7', 'Rolling retention window for CVI_Daily_Baseline snapshots'],
     [
       CONFIG_KEYS.SOURCE_PREFIX + 'project1',
       '{"enabled":true,"sourceSystem":"CM360 Audit System","sourceProject":"CM360 Audit System","spreadsheetId":"1MUDE5geWlO9Flmy3vtfCNRrsnpDAMcz0z1uA0Lu2Ilw","exportTab":"CM360_Flagged_Export"}',
@@ -72,6 +74,7 @@ function seedArchitectureMapSheet_() {
       ['Mapping', 'Tab', 'Networks', 'Expected fields: Network Name, Advertiser, Account REP OPS'],
       ['Source Project', 'CM360 Audit System', '1MUDE5geWlO9Flmy3vtfCNRrsnpDAMcz0z1uA0Lu2Ilw | CM360_Flagged_Export', 'Account: platformsolutionshmi@gmail.com'],
       ['Source Project', 'Daily CVI Catch', '1K4RfCJashYD-5AEoMyqJsNCIAmLxusDTvbwk665LWYo | Output', 'Account: platformsolutionsadopshorizon@gmail.com'],
+      ['Source Project', 'Daily CVI Catch Baseline', '1K4RfCJashYD-5AEoMyqJsNCIAmLxusDTvbwk665LWYo | Data', 'Reference-only daily baseline (not incident flags)'],
       ['Source Project', 'End-of-Month Tracker', '1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o | Violations', 'Account: platformsolutionsadopshorizon@gmail.com']
     ]
   );
@@ -99,6 +102,7 @@ function seedProjectAccountsSheet_() {
 
 function seedDataSheets_() {
   clearAndWriteTable_(SHEETS.NETWORK_MAPPING, ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS'], []);
+  clearAndWriteTable_(SHEETS.CVI_DAILY_BASELINE, CVI_BASELINE_COLUMNS, []);
   clearAndWriteTable_(SHEETS.RAW_IMPORTED_EVENTS, RAW_EVENT_COLUMNS, []);
   clearAndWriteTable_(SHEETS.NORMALIZED_LEDGER, NORMALIZED_LEDGER_COLUMNS, []);
   clearAndWriteTable_(SHEETS.IMPORTED_NETWORK_SUMMARIES, ['Event Date', 'Source System', 'Network ID', 'Network Name', 'Metric Name', 'Metric Value'], []);

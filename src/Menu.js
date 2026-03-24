@@ -2,6 +2,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('AdOps Intelligence Hub')
     .addItem('Refresh Source Exports', 'refreshSourceExports')
+    .addItem('Refresh CVI Baseline (Data Tab)', 'refreshCviBaselineReference')
     .addItem('Refresh Network Mapping', 'refreshNetworkMapping')
     .addItem('Run Weekly Summary', 'runWeeklySummaryEmail')
     .addItem('Run All Summaries', 'runAllSummaries')

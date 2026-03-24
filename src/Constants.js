@@ -5,6 +5,7 @@ const SHEETS = {
   CONFIG: 'Config',
   WEEKLY_RECIPIENTS: 'Weekly_Recipients',
   PROJECT_ACCOUNTS: 'Project_Accounts',
+  CVI_DAILY_BASELINE: 'CVI_Daily_Baseline',
   NETWORK_MAPPING: 'Network_Mapping',
   RAW_IMPORTED_EVENTS: 'Raw_Imported_Events',
   NORMALIZED_LEDGER: 'Normalized_Event_Ledger',
@@ -51,6 +52,24 @@ const RAW_EVENT_COLUMNS = [
   'Raw JSON Snapshot'
 ];
 
+const CVI_BASELINE_COLUMNS = [
+  'Snapshot Date',
+  'Source System',
+  'Source Project',
+  'Network ID',
+  'Advertiser ID',
+  'Advertiser',
+  'Campaign ID',
+  'Campaign',
+  'Placement ID',
+  'Placement',
+  'Impressions',
+  'Clicks',
+  'Import Timestamp',
+  'Snapshot Key',
+  'Raw JSON Snapshot'
+];
+
 const NORMALIZED_LEDGER_COLUMNS = [
   'Event Date',
   'Event Week',
@@ -73,7 +92,10 @@ const NORMALIZED_LEDGER_COLUMNS = [
   'Source Email Link',
   'Source File Link',
   'Full Row Hash',
-  'Imported At'
+  'Imported At',
+  'Also Flagged By',
+  'Cross Source Issue Flags',
+  'Cross Source Join Level'
 ];
 
 const CONFIG_KEYS = {
@@ -81,6 +103,8 @@ const CONFIG_KEYS = {
   AUDIT_EXPORT_FOLDER_ID: 'audit_export_folder_id',
   MAPPING_SOURCE_SPREADSHEET_ID: 'mapping_source_spreadsheet_id',
   MAPPING_SOURCE_TAB: 'mapping_source_tab',
+  CVI_BASELINE_TAB: 'cvi_baseline_tab',
+  CVI_BASELINE_RETENTION_DAYS: 'cvi_baseline_retention_days',
   SOURCE_PREFIX: 'source.'
 };
 

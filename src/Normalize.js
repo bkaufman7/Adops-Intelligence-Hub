@@ -3,10 +3,13 @@ function normalizeRawEvents_() {
     const mapping = buildNetworkMap_();
     const rawRows = readTable_(SHEETS.RAW_IMPORTED_EVENTS);
     const deduped = dedupeExactFullRow_(rawRows);
+    const missingMappingCounts = {};
 
     const normalizedRows = deduped.map(function (row) {
-      return normalizeEventRow_(row, mapping);
+      return normalizeEventRow_(row, mapping, missingMappingCounts);
     });
+
+    logMissingMappingsSummary_(missingMappingCounts);
 
     clearAndWriteTable_(
       SHEETS.NORMALIZED_LEDGER,
@@ -16,18 +19,23 @@ function normalizeRawEvents_() {
       })
     );
 
-    return { rawRows: rawRows.length, dedupedRows: deduped.length, normalizedRows: normalizedRows.length };
+    return {
+      rawRows: rawRows.length,
+      dedupedRows: deduped.length,
+      normalizedRows: normalizedRows.length,
+      missingMappingGroups: Object.keys(missingMappingCounts).length
+    };
   });
 }
 
-function normalizeEventRow_(row, mapping) {
+function normalizeEventRow_(row, mapping, missingMappingCounts) {
   const eventDate = parseDateSafe_(row['Event Date']);
   const networkId = String(row['Network ID'] || '').trim();
   const networkNameRaw = String(row['Network Name'] || '').trim();
   const mapHit = mapping['id:' + networkId] || mapping['name:' + networkNameRaw.toLowerCase()] || {};
 
   if (!mapHit['Network ID'] && !mapHit['Network Name']) {
-    logRun_('normalizeEventRow_', RUN_STATUS.WARNING, 'Mapping not found', { networkId: networkId, networkName: networkNameRaw });
+    trackMissingMapping_(missingMappingCounts, networkId, networkNameRaw);
   }
 
   return {
@@ -43,7 +51,7 @@ function normalizeEventRow_(row, mapping) {
     'Placement ID': row['Placement ID'] || '',
     'Placement Name': row['Placement Name'] || '',
     'Issue Type': row['Issue Type Raw'] || '',
-    'Issue Flags': row['Issue Flags'] || '',
+    'Issue Flags': row['Issue Flags'] || row['Issue Type Raw'] || '',
     'Issue Detail': row['Issue Detail'] || '',
     'Impressions': row['Impressions'] || '',
     'Clicks': row['Clicks'] || '',
@@ -54,6 +62,47 @@ function normalizeEventRow_(row, mapping) {
     'Full Row Hash': row['Full Row Hash'] || '',
     'Imported At': row['Import Timestamp'] || new Date()
   };
+}
+
+function trackMissingMapping_(missingMappingCounts, networkId, networkName) {
+  if (!missingMappingCounts) {
+    return;
+  }
+
+  // Ignore fully blank identifiers; these create log noise and are not actionable mapping keys.
+  if (!networkId && !networkName) {
+    return;
+  }
+
+  const key = [networkId || '', networkName || ''].join('||');
+  if (!missingMappingCounts[key]) {
+    missingMappingCounts[key] = {
+      networkId: networkId,
+      networkName: networkName,
+      count: 0
+    };
+  }
+
+  missingMappingCounts[key].count += 1;
+}
+
+function logMissingMappingsSummary_(missingMappingCounts) {
+  const items = Object.keys(missingMappingCounts || {}).map(function (key) {
+    return missingMappingCounts[key];
+  });
+
+  if (!items.length) {
+    return;
+  }
+
+  items.sort(function (a, b) {
+    return b.count - a.count;
+  });
+
+  logRun_('normalizeRawEvents_', RUN_STATUS.WARNING, 'Missing mappings summary', {
+    distinctGroups: items.length,
+    topMissingMappings: items.slice(0, 25)
+  });
 }
 
 function parseDateSafe_(value) {
