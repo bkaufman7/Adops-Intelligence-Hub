@@ -35,19 +35,15 @@ function runFullRefresh() {
       return refreshSourceExports();
     });
 
-    result.refreshCviBaseline = runLoggedStep_('runFullRefresh', '2. Refresh CVI Baseline', function () {
-      return refreshCviBaselineReference();
-    });
-
-    result.runAllSummaries = runLoggedStep_('runFullRefresh', '3. Run All Summaries', function () {
+    result.runAllSummaries = runLoggedStep_('runFullRefresh', '2. Run All Summaries', function () {
       return runAllSummaries();
     });
 
-    logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully', {
-      totalSteps: 3,
+    logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully (CVI Baseline skipped - run separately if needed)', {
+      totalSteps: 2,
       sourceExportResult: result.refreshSourceExports,
-      cviBaselineResult: result.refreshCviBaseline,
-      summariesResult: result.runAllSummaries
+      summariesResult: result.runAllSummaries,
+      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed.'
     });
 
     return result;
