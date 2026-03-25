@@ -50,7 +50,7 @@ function importProject1Rows_(sourceCfg) {
 
       // Network / advertiser / placement
       'Network ID':             data['Network ID'] || '',
-      'Network Name':           data['Network Name'] || '',
+      'Network Name':           data['Network Name'] || data['Advertiser'] || '',  // Fallback to Advertiser
       'Advertiser':             data['Advertiser'] || '',
       'Campaign':               data['Campaign'] || '',
       'Placement ID':           data['Placement ID'] || '',
