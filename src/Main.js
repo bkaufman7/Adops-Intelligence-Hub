@@ -27,6 +27,33 @@ function runAllSummaries() {
   });
 }
 
+function runFullRefresh() {
+  return withRunLogging_('runFullRefresh', function () {
+    const result = {};
+
+    result.refreshSourceExports = runLoggedStep_('runFullRefresh', '1. Refresh Source Exports', function () {
+      return refreshSourceExports();
+    });
+
+    result.refreshCviBaseline = runLoggedStep_('runFullRefresh', '2. Refresh CVI Baseline', function () {
+      return refreshCviBaselineReference();
+    });
+
+    result.runAllSummaries = runLoggedStep_('runFullRefresh', '3. Run All Summaries', function () {
+      return runAllSummaries();
+    });
+
+    logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully', {
+      totalSteps: 3,
+      sourceExportResult: result.refreshSourceExports,
+      cviBaselineResult: result.refreshCviBaseline,
+      summariesResult: result.runAllSummaries
+    });
+
+    return result;
+  });
+}
+
 function runProjectPipeline() {
   return withRunLogging_('runProjectPipeline', function () {
     refreshNetworkMapping();

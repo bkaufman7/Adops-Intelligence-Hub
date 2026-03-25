@@ -1,6 +1,8 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('AdOps Intelligence Hub')
+    .addItem('🚀 Full Refresh (All Data)', 'runFullRefresh')
+    .addSeparator()
     .addItem('Refresh Source Exports', 'refreshSourceExports')
     .addItem('Refresh CVI Baseline (Data Tab)', 'refreshCviBaselineReference')
     .addItem('Refresh Network Mapping', 'refreshNetworkMapping')
