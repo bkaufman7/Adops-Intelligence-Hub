@@ -13,6 +13,7 @@ const SHEETS = {
   SUMMARY_BY_SYSTEM: 'Summary_By_System',
   SUMMARY_BY_NETWORK: 'Summary_By_Network',
   SUMMARY_BY_ISSUE_TYPE: 'Summary_By_Issue_Type',
+  NETWORK_GRADING: 'Network_Grading',
   TREND_WEEKLY: 'Trend_Weekly',
   TREND_MONTHLY: 'Trend_Monthly',
   RUN_LOG: 'Run_Log',

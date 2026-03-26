@@ -8,6 +8,7 @@ function onOpen() {
     .addItem('Refresh Network Mapping', 'refreshNetworkMapping')
     .addItem('Run Weekly Summary', 'runWeeklySummaryEmail')
     .addItem('Run All Summaries', 'runAllSummaries')
+    .addItem('📊 Build Network Grading', 'buildNetworkGrading')
     .addSeparator()
     .addItem('Start Historical Backfill', 'startHistoricalBackfill')
     .addItem('Continue Historical Backfill', 'continueHistoricalBackfill')

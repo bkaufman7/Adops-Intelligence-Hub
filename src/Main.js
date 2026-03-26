@@ -6,6 +6,12 @@ function refreshCviBaselineReference() {
   return refreshCviBaselineReference_();
 }
 
+function buildNetworkGrading() {
+  return withRunLogging_('buildNetworkGrading', function () {
+    return buildNetworkGrading_();
+  });
+}
+
 function runAllSummaries() {
   return withRunLogging_('runAllSummaries', function () {
     const result = {};
@@ -21,6 +27,9 @@ function runAllSummaries() {
     });
     result.buildTrends = runLoggedStep_('runAllSummaries', 'buildTrends_', function () {
       return buildTrends_();
+    });
+    result.buildNetworkGrading = runLoggedStep_('runAllSummaries', 'buildNetworkGrading_', function () {
+      return buildNetworkGrading_();
     });
 
     return result;
