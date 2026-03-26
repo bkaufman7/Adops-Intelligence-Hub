@@ -87,20 +87,15 @@ function runFullRefresh() {
       return refreshSourceExports();
     });
 
-    result.runAllSummaries = runLoggedStep_('runFullRefresh', '2. Run All Summaries', function () {
+    result.runAllSummaries = runLoggedStep_('runFullRefresh', '2. Run All Summaries (includes grading)', function () {
       return runAllSummaries();
     });
 
-    result.buildNetworkGrades = runLoggedStep_('runFullRefresh', '3. Build Network Grades', function () {
-      return buildNetworkGrades();
-    });
-
     logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully (CVI Baseline skipped - run separately if needed)', {
-      totalSteps: 3,
+      totalSteps: 2,
       sourceExportResult: result.refreshSourceExports,
       summariesResult: result.runAllSummaries,
-      gradesResult: result.buildNetworkGrades,
-      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed.'
+      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed. Network grading is included in summaries step.'
     });
 
     return result;
