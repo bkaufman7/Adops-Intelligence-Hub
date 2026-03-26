@@ -11,7 +11,50 @@ function buildNetworkGrading() {
     return buildNetworkGrading_();
   });
 }
+function setupDailyTrigger() {
+  return withRunLogging_('setupDailyTrigger', function () {
+    // Remove existing triggers for runFullRefresh to avoid duplicates
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(function (trigger) {
+      if (trigger.getHandlerFunction() === 'runFullRefresh') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
 
+    // Create new daily trigger at 6 AM
+    ScriptApp.newTrigger('runFullRefresh')
+      .timeBased()
+      .atHour(6)
+      .everyDays(1)
+      .create();
+
+    logRun_('setupDailyTrigger', RUN_STATUS.SUCCESS, 'Daily trigger created for 6 AM', {
+      function: 'runFullRefresh',
+      schedule: 'Daily at 6:00 AM'
+    });
+
+    return { success: true, schedule: 'Daily at 6:00 AM', function: 'runFullRefresh' };
+  });
+}
+
+function removeDailyTrigger() {
+  return withRunLogging_('removeDailyTrigger', function () {
+    const triggers = ScriptApp.getProjectTriggers();
+    let removed = 0;
+    triggers.forEach(function (trigger) {
+      if (trigger.getHandlerFunction() === 'runFullRefresh') {
+        ScriptApp.deleteTrigger(trigger);
+        removed++;
+      }
+    });
+
+    logRun_('removeDailyTrigger', RUN_STATUS.SUCCESS, 'Daily triggers removed', {
+      triggersRemoved: removed
+    });
+
+    return { success: true, triggersRemoved: removed };
+  });
+}
 function runAllSummaries() {
   return withRunLogging_('runAllSummaries', function () {
     const result = {};
@@ -48,10 +91,15 @@ function runFullRefresh() {
       return runAllSummaries();
     });
 
+    result.buildNetworkGrades = runLoggedStep_('runFullRefresh', '3. Build Network Grades', function () {
+      return buildNetworkGrades();
+    });
+
     logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully (CVI Baseline skipped - run separately if needed)', {
-      totalSteps: 2,
+      totalSteps: 3,
       sourceExportResult: result.refreshSourceExports,
       summariesResult: result.runAllSummaries,
+      gradesResult: result.buildNetworkGrades,
       note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed.'
     });
 
