@@ -65,21 +65,20 @@ function buildNetworkGrading_() {
     const trend = calculateTrend_(stats.last7DaysIssues, stats.last30DaysIssues);
     
     gradeData.push({
-      'Network Name': networkName,
-      'Total Issues (All Time)': stats.totalIssues,
-      'Unique Placements': placementCount,
-      'Issues Per Placement': placementCount > 0 ? issueRate.toFixed(2) : 'N/A',
       'Grade': grade,
+      'Network Name': networkName,
+      'Total Issues': stats.totalIssues,
+      'Placements': placementCount,
+      'Issue Rate': placementCount > 0 ? issueRate.toFixed(2) : 'N/A',
       'Trend': trend,
-      'Last 7 Days': stats.last7DaysIssues,
-      'Last 30 Days': stats.last30DaysIssues,
-      'Avg Issues Per Day (30d)': (stats.last30DaysIssues / 30).toFixed(1)
+      '7-Day': stats.last7DaysIssues,
+      '30-Day': stats.last30DaysIssues
     });
   });
 
   // Sort by total issues descending (show worst performers first)
   gradeData.sort(function(a, b) {
-    return b['Total Issues (All Time)'] - a['Total Issues (All Time)'];
+    return b['Total Issues'] - a['Total Issues'];
   });
 
   // Write to sheet with formatting
@@ -89,7 +88,7 @@ function buildNetworkGrading_() {
   logRun_('buildNetworkGrading_', RUN_STATUS.SUCCESS, 'Completed', {
     networksGraded: gradeData.length,
     topViolator: gradeData.length > 0 ? gradeData[0]['Network Name'] : null,
-    topViolatorCount: gradeData.length > 0 ? gradeData[0]['Total Issues (All Time)'] : 0
+    topViolatorCount: gradeData.length > 0 ? gradeData[0]['Total Issues'] : 0
   });
 
   return { networksGraded: gradeData.length };
@@ -137,16 +136,29 @@ function applyGradingFormatting_() {
   // Find column indices
   const headers = values[0];
   const gradeColIndex = headers.indexOf('Grade') + 1;
+  const networkColIndex = headers.indexOf('Network Name') + 1;
+  const totalIssuesColIndex = headers.indexOf('Total Issues') + 1;
   const trendColIndex = headers.indexOf('Trend') + 1;
-  const issuesColIndex = headers.indexOf('Total Issues (All Time)') + 1;
   
-  // Apply conditional formatting to Grade column
+  // Set specific column widths for cleaner vertical layout
+  sheet.setColumnWidth(gradeColIndex, 60);      // Grade: compact
+  sheet.setColumnWidth(networkColIndex, 250);   // Network Name: wider for readability
+  sheet.setColumnWidth(totalIssuesColIndex, 100); // Total Issues
+  sheet.setColumnWidth(headers.indexOf('Placements') + 1, 90); // Placements
+  sheet.setColumnWidth(headers.indexOf('Issue Rate') + 1, 90);  // Issue Rate
+  sheet.setColumnWidth(trendColIndex, 110);     // Trend
+  sheet.setColumnWidth(headers.indexOf('7-Day') + 1, 70);   // 7-Day
+  sheet.setColumnWidth(headers.indexOf('30-Day') + 1, 70);  // 30-Day
+  
+  // Apply color coding to Grade column
   if (gradeColIndex > 0) {
     for (let i = 2; i <= values.length; i++) {
       const grade = values[i - 1][gradeColIndex - 1];
       const cell = sheet.getRange(i, gradeColIndex);
       
       cell.setFontWeight('bold');
+      cell.setHorizontalAlignment('center');
+      cell.setFontSize(12);
       
       switch (grade) {
         case 'A':
@@ -174,11 +186,11 @@ function applyGradingFormatting_() {
   }
   
   // Apply color scale to Total Issues column (heat map)
-  if (issuesColIndex > 0) {
-    const issuesRange = sheet.getRange(2, issuesColIndex, values.length - 1, 1);
+  if (totalIssuesColIndex > 0) {
+    const issuesRange = sheet.getRange(2, totalIssuesColIndex, values.length - 1, 1);
     const rule = SpreadsheetApp.newConditionalFormatRule()
-      .setGradientMaxpointWithValue('#cc0000', SpreadsheetApp.InterpolationType.NUMBER, '1000')
-      .setGradientMidpointWithValue('#ffd966', SpreadsheetApp.InterpolationType.PERCENTILE, '50')
+      .setGradientMaxpointWithValue('#ffe6e6', SpreadsheetApp.InterpolationType.NUMBER, '1000')
+      .setGradientMidpointWithValue('#fff3e6', SpreadsheetApp.InterpolationType.PERCENTILE, '50')
       .setGradientMinpointWithValue('#ffffff', SpreadsheetApp.InterpolationType.NUMBER, '0')
       .setRanges([issuesRange])
       .build();
@@ -190,18 +202,48 @@ function applyGradingFormatting_() {
   
   // Format header row
   const headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange.setBackground('#4285f4');
+  headerRange.setBackground('#1a73e8');
   headerRange.setFontColor('#ffffff');
   headerRange.setFontWeight('bold');
+  headerRange.setFontSize(11);
   headerRange.setHorizontalAlignment('center');
+  headerRange.setVerticalAlignment('middle');
   
-  // Auto-resize columns
-  for (let i = 1; i <= headers.length; i++) {
-    sheet.autoResizeColumn(i);
+  // Center-align numeric columns
+  if (totalIssuesColIndex > 0) {
+    sheet.getRange(2, totalIssuesColIndex, values.length - 1, 1).setHorizontalAlignment('center');
+  }
+  const placementsColIndex = headers.indexOf('Placements') + 1;
+  if (placementsColIndex > 0) {
+    sheet.getRange(2, placementsColIndex, values.length - 1, 1).setHorizontalAlignment('center');
+  }
+  const issueRateColIndex = headers.indexOf('Issue Rate') + 1;
+  if (issueRateColIndex > 0) {
+    sheet.getRange(2, issueRateColIndex, values.length - 1, 1).setHorizontalAlignment('center');
+  }
+  if (trendColIndex > 0) {
+    sheet.getRange(2, trendColIndex, values.length - 1, 1).setHorizontalAlignment('center');
+  }
+  const sevenDayColIndex = headers.indexOf('7-Day') + 1;
+  if (sevenDayColIndex > 0) {
+    sheet.getRange(2, sevenDayColIndex, values.length - 1, 1).setHorizontalAlignment('center');
+  }
+  const thirtyDayColIndex = headers.indexOf('30-Day') + 1;
+  if (thirtyDayColIndex > 0) {
+    sheet.getRange(2, thirtyDayColIndex, values.length - 1, 1).setHorizontalAlignment('center');
   }
   
-  // Freeze header row
+  // Add borders for better visual separation
+  dataRange.setBorder(true, true, true, true, true, true, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
+  
+  // Make network names bold for easier scanning
+  if (networkColIndex > 0) {
+    sheet.getRange(2, networkColIndex, values.length - 1, 1).setFontWeight('bold');
+  }
+  
+  // Freeze header row and Grade + Network columns for scrolling
   sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(2);
 }
 
 function parseDate_(value) {
