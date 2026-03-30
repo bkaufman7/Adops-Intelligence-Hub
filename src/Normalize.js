@@ -35,7 +35,10 @@ function normalizeEventRow_(row, mapping, missingMappingCounts) {
   const eventDate = parseDateSafe_(row['Event Date']);
   const networkId = String(row['Network ID'] || '').trim();
   const networkNameRaw = String(row['Network Name'] || '').trim();
-  const mapHit = mapping['id:' + networkId] || mapping['name:' + networkNameRaw.toLowerCase()] || {};
+  const mapHit = mapping['id:' + networkId] || 
+                 mapping['name:' + networkNameRaw.toLowerCase()] || 
+                 mapping['advertiser:' + networkNameRaw.toLowerCase()] || 
+                 {};
 
   if (!mapHit['Network ID'] && !mapHit['Network Name']) {
     trackMissingMapping_(missingMappingCounts, networkId, networkNameRaw);

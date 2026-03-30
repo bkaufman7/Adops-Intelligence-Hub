@@ -27,6 +27,7 @@ function buildNetworkMap_() {
   rows.forEach(function (row) {
     const id = String(row['Network ID'] || '').trim();
     const name = String(row['Network Name'] || '').trim().toLowerCase();
+    const advertiser = String(row['Advertiser'] || '').trim().toLowerCase();
 
     if (id) {
       map['id:' + id] = row;
@@ -34,6 +35,11 @@ function buildNetworkMap_() {
 
     if (name) {
       map['name:' + name] = row;
+    }
+
+    // Also match on advertiser column - many events use advertiser as network name
+    if (advertiser) {
+      map['advertiser:' + advertiser] = row;
     }
   });
 
