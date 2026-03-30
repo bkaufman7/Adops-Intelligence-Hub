@@ -19,6 +19,9 @@ function normalizeRawEvents_() {
       })
     );
 
+    // Track unmapped networks for monitoring
+    writeUnmappedNetworksSummary_(missingMappingCounts);
+
     return {
       rawRows: rawRows.length,
       dedupedRows: deduped.length,
@@ -103,6 +106,65 @@ function logMissingMappingsSummary_(missingMappingCounts) {
     distinctGroups: items.length,
     topMissingMappings: items.slice(0, 25)
   });
+}
+
+function writeUnmappedNetworksSummary_(missingMappingCounts) {
+  const items = Object.keys(missingMappingCounts || {}).map(function (key) {
+    return missingMappingCounts[key];
+  });
+
+  if (!items.length) {
+    clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, ['Status'], [['✅ All networks are mapped!']]);
+    return;
+  }
+
+  items.sort(function (a, b) {
+    return b.count - a.count;
+  });
+
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(SHEETS.UNMAPPED_NETWORKS);
+  
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.UNMAPPED_NETWORKS);
+  } else {
+    sheet.clear();
+  }
+
+  const outputData = [];
+  
+  // Header
+  outputData.push(['🔍 UNMAPPED NETWORKS']);
+  outputData.push(['Networks that need mapping entries in Network_Mapping sheet']);
+  outputData.push(['Add these to keep Advertiser and Account REP OPS data complete']);
+  outputData.push(['']); // Blank row
+  outputData.push(['📊 Total Unmapped: ' + items.length + ' network(s)']);
+  outputData.push(['']); // Blank row
+  
+  // Each unmapped network
+  items.forEach(function(item, index) {
+    const rank = index + 1;
+    outputData.push(['#' + rank + ' - ' + (item.networkName || 'ID: ' + item.networkId)]);
+    
+    const details = [];
+    if (item.networkId) details.push('Network ID: ' + item.networkId);
+    if (item.networkName) details.push('Network Name: ' + item.networkName);
+    details.push('Event Count: ' + item.count);
+    
+    outputData.push(['       ' + details.join(' | ')]);
+    outputData.push(['']); // Blank separator
+  });
+  
+  // Write to column A
+  if (outputData.length > 0) {
+    sheet.getRange(1, 1, outputData.length, 1).setValues(outputData);
+  }
+  
+  // Format
+  sheet.setColumnWidth(1, 900);
+  sheet.getRange(1, 1).setFontSize(14).setFontWeight('bold').setBackground('#ea4335').setFontColor('#ffffff');
+  sheet.getRange(2, 1, 2, 1).setFontSize(10).setFontStyle('italic').setBackground('#fce8e6');
+  sheet.getRange(1, 1, sheet.getMaxRows(), 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 }
 
 function parseDateSafe_(value) {

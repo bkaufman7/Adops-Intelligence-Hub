@@ -199,15 +199,10 @@ function writeSingleColumnRepGrading_(repGradeData) {
     // Blank separator before networks
     outputData.push(['']);
     
-    // Network breakdown (top 10 only to keep readable)
-    const topNetworks = rep.networks.slice(0, 10);
-    topNetworks.forEach(function(network) {
+    // Network breakdown (show all networks)
+    rep.networks.forEach(function(network) {
       outputData.push(['           ↳ ' + network.name + ': ' + network.uniqueIssues + ' issues, ' + network.placements + ' placements, ratio ' + network.ratio]);
     });
-    
-    if (rep.networks.length > 10) {
-      outputData.push(['           ... and ' + (rep.networks.length - 10) + ' more networks']);
-    }
     
     // Blank separator between reps
     outputData.push(['']);

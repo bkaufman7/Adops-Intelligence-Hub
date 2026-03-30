@@ -111,6 +111,7 @@ function seedDataSheets_() {
   clearAndWriteTable_(SHEETS.SUMMARY_BY_ISSUE_TYPE, ['Issue Flags', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.NETWORK_GRADING, ['Network Name', 'Total Issues (All Time)', 'Unique Placements', 'Issues Per Placement', 'Grade', 'Trend', 'Last 7 Days', 'Last 30 Days', 'Avg Issues Per Day (30d)'], []);
   clearAndWriteTable_(SHEETS.REP_GRADING, ['AdOps Rep Performance Grading'], []);
+  clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, ['Unmapped Networks'], []);
   clearAndWriteTable_(SHEETS.TREND_WEEKLY, ['Event Week', 'Source System', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.TREND_MONTHLY, ['Event Month', 'Source System', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context'], []);
