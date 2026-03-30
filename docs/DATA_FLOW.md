@@ -90,13 +90,24 @@
 
 ## 🔑 Network_Mapping Tab - THE CRITICAL LOOKUP TABLE
 
-### **Current Flow:**
+### **Current Flow (FIXED):**
 ```
 External Spreadsheet (Project 3/EOM)
   Spreadsheet ID: 1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o
   Tab: "Networks"
+  
+  Structure:
+  - Columns A-B: Personal log (ignored)
+  - Columns C-O: Config/metadata (ignored)
+  - **Columns P-S: Mapping data (extracted)**
+    * P: Network ID
+    * Q: Network Name
+    * R: Advertiser  
+    * S: Account REP OPS
            │
-           │ refreshNetworkMapping() - OVERWRITES Hub's Network_Mapping
+           │ refreshNetworkMapping() - Dynamically finds "Network ID" column
+           │ Extracts only columns P-S (4 columns from Network ID onwards)
+           │ Overwrites Hub's Network_Mapping with fresh data
            ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  AdOps Intelligence Hub - Network_Mapping Tab                │
@@ -104,13 +115,13 @@ External Spreadsheet (Project 3/EOM)
 │  Columns: Network ID | Network Name | Advertiser | Account  │
 │           REP OPS                                            │
 │                                                              │
-│  ⚠️  PROBLEM: refreshNetworkMapping() copies ALL columns    │
-│      from source. If source is missing Advertiser/Rep       │
-│      columns, the Hub's mapping gets overwritten with       │
-│      empty values!                                           │
+│  ✅ FIXED: refreshNetworkMapping() now finds "Network ID"   │
+│      column dynamically and extracts only the 4 mapping     │
+│      columns, skipping personal log and metadata            │
 └──────────────────────────────────────────────────────────────┘
            │
            │ Used by normalizeEventRow_() to enrich events
+           │ Matching logic: Network ID → Network Name → Advertiser (fallback)
            ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Normalized_Event_Ledger                                     │
@@ -125,52 +136,41 @@ External Spreadsheet (Project 3/EOM)
 
 ---
 
-## ❓ **CRITICAL QUESTIONS:**
+## ✅ **ISSUE RESOLVED**
 
-### **Question 1: Source Mapping Spreadsheet Structure**
-The Project 3/EOM spreadsheet (`1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o`) Networks tab:
-- **Does it have 4 columns:** `Network ID | Network Name | Advertiser | Account REP OPS`?
-- **Are the Advertiser and Account REP OPS columns populated** with data?
-- **Or does it only have 2 columns:** `Network ID | Network Name` (missing the other two)?
+### **Root Cause Identified:**
+The Project 3 Networks tab has multiple data sets:
+- Columns A-B: Personal network log (user's tracking)
+- Columns P-S: Actual mapping data with Advertiser and Rep assignments
 
-### **Question 2: Manual Data Entry**
-- Did you **manually add** the Advertiser and Account REP OPS columns to the **Hub's** Network_Mapping tab?
-- Are you maintaining that data **only in the Hub**, not in the Project 3 source?
+Previous code used `getDataRange().getValues()` which copied **ALL columns** including the personal log, causing misaligned headers and empty Advertiser/Rep values in the Hub.
 
-### **Question 3: Refresh Workflow**
-- When you run "Refresh Network Mapping" from the menu, do you see the Advertiser and Account REP OPS columns get **wiped out**?
-- Or do they stay populated?
+### **Solution Implemented:**
+Updated `refreshNetworkMapping()` to:
+1. **Dynamically find** the "Network ID" column (column P)
+2. **Extract only 4 columns** from that point: Network ID, Network Name, Advertiser, Account REP OPS
+3. **Skip all preceding columns** (A-O) containing personal log and metadata
 
----
-
-## 💡 **Suspected Issue:**
-
-I believe what's happening is:
-
-1. **Project 3 source spreadsheet** only has: `Network ID | Network Name` (2 columns)
-2. You **manually added** Advertiser and Rep data to the **Hub's** Network_Mapping tab
-3. When `refreshNetworkMapping()` runs, it pulls from Project 3 and **overwrites** your manual data
-4. This explains why Network_Mapping in export 8 has empty Advertiser/Rep columns
+### **Deployment:**
+- Committed: `773de61`
+- Deployed: 22 files via `clasp push`
+- Status: ✅ Ready for testing
 
 ---
 
-## 🔧 **Proposed Solutions (pending your answers):**
+## 🎯 **Next Steps:**
 
-### **Option A:** Update Project 3 Source (Recommended)
-- Add Advertiser and Account REP OPS columns to Project 3's Networks tab
-- Populate them there (single source of truth)
-- `refreshNetworkMapping()` will then pull complete data
+1. **Test the fix:**
+   - Go to your Hub spreadsheet
+   - Run: **AdOps Intelligence Hub Menu → Refresh Network Mapping**
+   - Verify Network_Mapping tab now has populated Advertiser and Account REP OPS columns
 
-### **Option B:** Change Hub to Own the Mapping Data
-- Stop pulling from Project 3
-- Maintain Network_Mapping directly in the Hub
-- Disable/remove `refreshNetworkMapping()` calls
+2. **Run Full Refresh:**
+   - After verifying mapping is correct, run: **Full Refresh (All Data)**
+   - Check Unmapped_Networks - should now show far fewer items (only truly new networks)
+   - Check Rep_Grading - "Unassigned" should have much fewer networks
 
-### **Option C:** Merge Strategy (Most Robust)
-- Pull Network ID + Network Name from Project 3
-- Preserve Advertiser and Account REP OPS columns in Hub (don't overwrite)
-- Requires code changes to merge instead of replacing
-
----
-
-**Which option makes sense for your workflow?**
+3. **Expected Results:**
+   - Most of those 33 "unmapped" networks should now match correctly
+   - Reps should be properly assigned
+   - Unmapped_Networks should only show genuinely new advertisers
