@@ -11,6 +11,13 @@ function buildNetworkGrading() {
     return buildNetworkGrading_();
   });
 }
+
+function buildRepGrading() {
+  return withRunLogging_('buildRepGrading', function () {
+    return buildRepGrading_();
+  });
+}
+
 function setupDailyTrigger() {
   return withRunLogging_('setupDailyTrigger', function () {
     // Remove existing triggers for runFullRefresh to avoid duplicates
@@ -74,6 +81,9 @@ function runAllSummaries() {
     result.buildNetworkGrading = runLoggedStep_('runAllSummaries', 'buildNetworkGrading_', function () {
       return buildNetworkGrading_();
     });
+    result.buildRepGrading = runLoggedStep_('runAllSummaries', 'buildRepGrading_', function () {
+      return buildRepGrading_();
+    });
 
     return result;
   });
@@ -95,7 +105,7 @@ function runFullRefresh() {
       totalSteps: 2,
       sourceExportResult: result.refreshSourceExports,
       summariesResult: result.runAllSummaries,
-      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed. Network grading is included in summaries step.'
+      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed. Network grading and rep grading are included in summaries step.'
     });
 
     return result;

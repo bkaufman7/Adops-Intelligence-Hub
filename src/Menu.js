@@ -9,6 +9,7 @@ function onOpen() {
     .addItem('Run Weekly Summary', 'runWeeklySummaryEmail')
     .addItem('Run All Summaries', 'runAllSummaries')
     .addItem('📊 Build Network Grading', 'buildNetworkGrading')
+    .addItem('👤 Build Rep Grading', 'buildRepGrading')
     .addSeparator()
     .addItem('⏰ Setup Daily Auto-Refresh (6 AM)', 'setupDailyTrigger')
     .addItem('⏰ Remove Daily Auto-Refresh', 'removeDailyTrigger')
