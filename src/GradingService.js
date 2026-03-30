@@ -17,21 +17,29 @@ function buildNetworkGrading_() {
     return { gradesCalculated: 0 };
   }
 
-  // Aggregate by network
+  // Aggregate by network - count UNIQUE issues (placement + issue type combos)
   const networkStats = {};
   
   ledger.forEach(function(row) {
     const networkName = String(row['Network Name'] || 'Unknown').trim();
     const placementId = String(row['Placement ID'] || '').trim();
+    const issueType = String(row['Issue Type'] || '').trim();
     
     if (!networkStats[networkName]) {
       networkStats[networkName] = {
-        totalIssues: 0,
+        totalEventCount: 0,
+        uniqueIssues: {},  // Track unique placement + issue type combos
         uniquePlacements: {}
       };
     }
     
-    networkStats[networkName].totalIssues++;
+    networkStats[networkName].totalEventCount++;
+    
+    // Track unique issues (placement + issue type combination)
+    if (placementId && issueType) {
+      const issueKey = placementId + '|' + issueType;
+      networkStats[networkName].uniqueIssues[issueKey] = true;
+    }
     
     if (placementId) {
       networkStats[networkName].uniquePlacements[placementId] = true;
@@ -44,22 +52,24 @@ function buildNetworkGrading_() {
   Object.keys(networkStats).forEach(function(networkName) {
     const stats = networkStats[networkName];
     const placementCount = Object.keys(stats.uniquePlacements).length;
-    const issueRate = placementCount > 0 ? (stats.totalIssues / placementCount) : stats.totalIssues;
+    const uniqueIssueCount = Object.keys(stats.uniqueIssues).length;
+    const issueRate = placementCount > 0 ? (uniqueIssueCount / placementCount) : uniqueIssueCount;
     
     const grade = calculateGrade_(issueRate);
     
     gradeData.push({
       networkName: networkName,
       grade: grade,
-      totalIssues: stats.totalIssues,
+      uniqueIssues: uniqueIssueCount,
+      totalEvents: stats.totalEventCount,
       placementCount: placementCount,
       issueRate: issueRate
     });
   });
 
-  // Sort by total issues descending (show worst performers first)
+  // Sort by unique issues descending (show worst performers first)
   gradeData.sort(function(a, b) {
-    return b.totalIssues - a.totalIssues;
+    return b.uniqueIssues - a.uniqueIssues;
   });
 
   // Write to sheet in single-column format
@@ -68,7 +78,7 @@ function buildNetworkGrading_() {
   logRun_('buildNetworkGrading_', RUN_STATUS.SUCCESS, 'Completed', {
     networksGraded: gradeData.length,
     topViolator: gradeData.length > 0 ? gradeData[0].networkName : null,
-    topViolatorCount: gradeData.length > 0 ? gradeData[0].totalIssues : 0
+    topViolatorUniqueIssues: gradeData.length > 0 ? gradeData[0].uniqueIssues : 0
   });
 
   return { networksGraded: gradeData.length };
@@ -105,7 +115,7 @@ function writeSingleColumnGrading_(gradeData) {
   
   // Header
   outputData.push(['📊 NETWORK PERFORMANCE GRADING']);
-  outputData.push(['Ranked by Total Issues (Highest to Lowest)']);
+  outputData.push(['Ranked by Unique Issues (Highest to Lowest)']);
   outputData.push(['']); // Blank row
   
   // Each network gets multiple rows
@@ -117,11 +127,11 @@ function writeSingleColumnGrading_(gradeData) {
     const gradeEmoji = getGradeEmoji_(network.grade);
     outputData.push([rankEmoji + ' #' + rank + ' - ' + network.networkName + ' [Grade: ' + network.grade + ' ' + gradeEmoji + ']']);
     
-    // Details row
+    // Details row - show unique issues (not total events)
     const issueRateText = network.placementCount > 0 ? 
-      network.issueRate.toFixed(2) + ' issues per placement' : 
+      network.issueRate.toFixed(2) + ' unique issues per placement' : 
       'No placements tracked';
-    outputData.push(['       📈 ' + network.totalIssues + ' total issues  |  📍 ' + network.placementCount + ' placements  |  ' + issueRateText]);
+    outputData.push(['       🚨 ' + network.uniqueIssues + ' unique issues (' + network.totalEvents + ' total events)  |  📍 ' + network.placementCount + ' placements  |  ' + issueRateText]);
     
     // Blank separator
     outputData.push(['']);
