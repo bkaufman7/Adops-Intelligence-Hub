@@ -49,32 +49,26 @@ function buildNetworkGrading_() {
     const grade = calculateGrade_(issueRate);
     
     gradeData.push({
-      'Network Name': networkName,
-      'Grade': grade,
-      'Total Issues': stats.totalIssues,
-      'Total Placements': placementCount,
-      'Issues per Placement': placementCount > 0 ? issueRate.toFixed(2) : 'N/A'
+      networkName: networkName,
+      grade: grade,
+      totalIssues: stats.totalIssues,
+      placementCount: placementCount,
+      issueRate: issueRate
     });
   });
 
   // Sort by total issues descending (show worst performers first)
   gradeData.sort(function(a, b) {
-    return b['Total Issues'] - a['Total Issues'];
-  });
-  
-  // Add rank numbers
-  gradeData.forEach(function(row, index) {
-    row['#'] = index + 1;
+    return b.totalIssues - a.totalIssues;
   });
 
-  // Write to sheet with formatting
-  clearAndWriteTable_(SHEETS.NETWORK_GRADING, gradeData);
-  applyGradingFormatting_();
+  // Write to sheet in single-column format
+  writeSingleColumnGrading_(gradeData);
 
   logRun_('buildNetworkGrading_', RUN_STATUS.SUCCESS, 'Completed', {
     networksGraded: gradeData.length,
-    topViolator: gradeData.length > 0 ? gradeData[0]['Network Name'] : null,
-    topViolatorCount: gradeData.length > 0 ? gradeData[0]['Total Issues'] : 0
+    topViolator: gradeData.length > 0 ? gradeData[0].networkName : null,
+    topViolatorCount: gradeData.length > 0 ? gradeData[0].totalIssues : 0
   });
 
   return { networksGraded: gradeData.length };
@@ -95,101 +89,87 @@ function calculateGrade_(issueRate) {
   return 'F';
 }
 
-function applyGradingFormatting_() {
+function writeSingleColumnGrading_(gradeData) {
   const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName(SHEETS.NETWORK_GRADING);
-  if (!sheet) return;
+  let sheet = ss.getSheetByName(SHEETS.NETWORK_GRADING);
   
-  const dataRange = sheet.getDataRange();
-  const values = dataRange.getValues();
+  // Clear or create sheet
+  if (sheet) {
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(SHEETS.NETWORK_GRADING);
+  }
   
-  if (values.length <= 1) return; // Only header
+  // Build single-column format
+  const outputData = [];
   
-  // Find column indices
-  const headers = values[0];
-  const rankColIndex = headers.indexOf('#') + 1;
-  const networkColIndex = headers.indexOf('Network Name') + 1;
-  const gradeColIndex = headers.indexOf('Grade') + 1;
-  const totalIssuesColIndex = headers.indexOf('Total Issues') + 1;
-  const placementsColIndex = headers.indexOf('Total Placements') + 1;
-  const issueRateColIndex = headers.indexOf('Issues per Placement') + 1;
+  // Header
+  outputData.push(['📊 NETWORK PERFORMANCE GRADING']);
+  outputData.push(['Ranked by Total Issues (Highest to Lowest)']);
+  outputData.push(['']); // Blank row
   
-  // Set column widths for clean vertical scanning
-  sheet.setColumnWidth(rankColIndex, 50);           // # - compact
-  sheet.setColumnWidth(networkColIndex, 300);       // Network Name - wide for readability
-  sheet.setColumnWidth(gradeColIndex, 70);          // Grade - compact
-  sheet.setColumnWidth(totalIssuesColIndex, 110);   // Total Issues
-  sheet.setColumnWidth(placementsColIndex, 130);    // Total Placements
-  sheet.setColumnWidth(issueRateColIndex, 150);     // Issues per Placement
-  
-  // Format header row
-  const headerRange = sheet.getRange(1, 1, 1, headers.length);
-  headerRange.setFontWeight('bold');
-  headerRange.setBackground('#4a86e8');
-  headerRange.setFontColor('#ffffff');
-  headerRange.setHorizontalAlignment('center');
-  
-  // Apply grade color-coding
-  for (let i = 2; i <= values.length; i++) {
-    const grade = values[i-1][gradeColIndex-1];
-    const gradeCell = sheet.getRange(i, gradeColIndex);
+  // Each network gets multiple rows
+  gradeData.forEach(function(network, index) {
+    const rank = index + 1;
+    const rankEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '  ';
     
-    let bgColor = '#ffffff';
-    let fontColor = '#000000';
+    // Main row: Rank + Network Name + Grade
+    const gradeEmoji = getGradeEmoji_(network.grade);
+    outputData.push([rankEmoji + ' #' + rank + ' - ' + network.networkName + ' [Grade: ' + network.grade + ' ' + gradeEmoji + ']']);
     
-    switch(grade) {
-      case 'A':
-        bgColor = '#34a853'; // Google green
-        fontColor = '#ffffff';
-        break;
-      case 'B':
-        bgColor = '#93c47d'; // Light green
-        fontColor = '#000000';
-        break;
-      case 'C':
-        bgColor = '#ffd966'; // Yellow
-        fontColor = '#000000';
-        break;
-      case 'D':
-        bgColor = '#ff9900'; // Orange
-        fontColor = '#ffffff';
-        break;
-      case 'F':
-        bgColor = '#cc0000'; // Red
-        fontColor = '#ffffff';
-        break;
-    }
+    // Details row
+    const issueRateText = network.placementCount > 0 ? 
+      network.issueRate.toFixed(2) + ' issues per placement' : 
+      'No placements tracked';
+    outputData.push(['       📈 ' + network.totalIssues + ' total issues  |  📍 ' + network.placementCount + ' placements  |  ' + issueRateText]);
     
-    gradeCell.setBackground(bgColor);
-    gradeCell.setFontColor(fontColor);
-    gradeCell.setFontWeight('bold');
-    gradeCell.setHorizontalAlignment('center');
-    gradeCell.setFontSize(12);
+    // Blank separator
+    outputData.push(['']);
+  });
+  
+  // Write all data to column A
+  if (outputData.length > 0) {
+    sheet.getRange(1, 1, outputData.length, 1).setValues(outputData);
   }
   
-  // Make network names bold for easy scanning
-  if (networkColIndex > 0) {
-    sheet.getRange(2, networkColIndex, values.length - 1, 1).setFontWeight('bold');
+  // Apply formatting
+  formatSingleColumnGrading_(sheet, gradeData.length);
+}
+
+function getGradeEmoji_(grade) {
+  switch(grade) {
+    case 'A': return '✅';
+    case 'B': return '👍';
+    case 'C': return '⚠️';
+    case 'D': return '⚠️';
+    case 'F': return '🚨';
+    default: return '';
+  }
+}
+
+function formatSingleColumnGrading_(sheet, networkCount) {
+  // Set column A width
+  sheet.setColumnWidth(1, 800);
+  
+  // Format header (rows 1-2)
+  sheet.getRange(1, 1).setFontSize(14).setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
+  sheet.getRange(2, 1).setFontSize(10).setFontStyle('italic').setBackground('#e8f0fe');
+  
+  // Format each network entry
+  let currentRow = 4; // Start after header + blank row
+  for (let i = 0; i < networkCount; i++) {
+    // Main network row (bold)
+    sheet.getRange(currentRow, 1).setFontWeight('bold').setFontSize(11);
+    
+    // Details row (smaller, grey)
+    sheet.getRange(currentRow + 1, 1).setFontSize(9).setFontColor('#666666');
+    
+    currentRow += 3; // Jump to next network (name + details + blank)
   }
   
-  // Right-align numeric columns
-  if (rankColIndex > 0) {
-    sheet.getRange(2, rankColIndex, values.length - 1, 1).setHorizontalAlignment('center');
-  }
-  if (totalIssuesColIndex > 0) {
-    sheet.getRange(2, totalIssuesColIndex, values.length - 1, 1).setHorizontalAlignment('right');
-  }
-  if (placementsColIndex > 0) {
-    sheet.getRange(2, placementsColIndex, values.length - 1, 1).setHorizontalAlignment('right');
-  }
-  if (issueRateColIndex > 0) {
-    sheet.getRange(2, issueRateColIndex, values.length - 1, 1).setHorizontalAlignment('right');
-  }
+  // Wrap text for all cells
+  sheet.getRange(1, 1, sheet.getMaxRows(), 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
   
-  // Add borders for visual separation
-  dataRange.setBorder(true, true, true, true, true, true, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
-  
-  // Freeze header row and rank column for scrolling
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(1);
+  // Freeze header rows
+  sheet.setFrozenRows(3);
 }
