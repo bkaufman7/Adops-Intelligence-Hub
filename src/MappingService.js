@@ -14,9 +14,37 @@ function refreshNetworkMapping() {
     }
 
     const values = sourceTab.getDataRange().getValues();
-    clearAndWriteTable_(SHEETS.NETWORK_MAPPING, values[0] || [], values.slice(1));
+    
+    // Find the column index where "Network ID" header starts
+    // (Source tab has personal log in columns A-B, mapping data starts at column P)
+    const headerRow = values[0] || [];
+    let startCol = -1;
+    for (let i = 0; i < headerRow.length; i++) {
+      if (String(headerRow[i]).trim() === 'Network ID') {
+        startCol = i;
+        break;
+      }
+    }
+    
+    if (startCol === -1) {
+      throw new Error('Could not find "Network ID" column in source mapping tab. Check that column P has "Network ID" header.');
+    }
+    
+    // Extract only the mapping columns (Network ID, Network Name, Advertiser, Account REP OPS)
+    // Expected: 4 columns starting from "Network ID"
+    const mappingHeaders = headerRow.slice(startCol, startCol + 4);
+    const mappingData = values.slice(1).map(function(row) {
+      return row.slice(startCol, startCol + 4);
+    });
+    
+    clearAndWriteTable_(SHEETS.NETWORK_MAPPING, mappingHeaders, mappingData);
 
-    return { rows: Math.max(values.length - 1, 0), tab: tabName };
+    return { 
+      rows: mappingData.length, 
+      tab: tabName,
+      startColumn: startCol + 1,
+      columnsExtracted: mappingHeaders
+    };
   });
 }
 
