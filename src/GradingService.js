@@ -17,31 +17,33 @@ function buildNetworkGrading_() {
     return { gradesCalculated: 0 };
   }
 
-  // Aggregate by network - count UNIQUE issues (placement + issue type combos)
+  // Aggregate by network - count UNIQUE issues (placement + issue fingerprint)
   const networkStats = {};
   
   ledger.forEach(function(row) {
     const networkName = String(row['Network Name'] || 'Unknown').trim();
     const placementId = String(row['Placement ID'] || '').trim();
     const issueType = String(row['Issue Type'] || '').trim();
+    const issueFlags = String(row['Issue Flags'] || '').trim();
+    const issueDetail = String(row['Issue Detail'] || '').trim();
     
     if (!networkStats[networkName]) {
       networkStats[networkName] = {
         totalEventCount: 0,
-        uniqueIssues: {},  // Track unique placement + issue type combos
+        uniqueIssues: {},  // Track unique placement + issue fingerprint combos
         uniquePlacements: {}
       };
     }
     
     networkStats[networkName].totalEventCount++;
     
-    // Track unique issues (placement + issue type combination)
-    if (placementId && issueType) {
-      const issueKey = placementId + '|' + issueType;
-      networkStats[networkName].uniqueIssues[issueKey] = true;
-    }
+    // Create issue fingerprint: use Issue Type, or fall back to Issue Flags + Detail
+    let issueFingerprint = issueType || issueFlags || issueDetail || 'Unknown Issue';
     
+    // Track unique issues (placement + issue fingerprint combination)
     if (placementId) {
+      const issueKey = placementId + '|' + issueFingerprint;
+      networkStats[networkName].uniqueIssues[issueKey] = true;
       networkStats[networkName].uniquePlacements[placementId] = true;
     }
   });
