@@ -125,49 +125,19 @@ function writeUnmappedNetworksSummary_(missingMappingCounts) {
     return b.count - a.count;
   });
 
-  const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(SHEETS.UNMAPPED_NETWORKS);
-  
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEETS.UNMAPPED_NETWORKS);
-  } else {
-    sheet.clear();
-  }
-
-  const outputData = [];
-  
-  // Header
-  outputData.push(['🔍 UNMAPPED NETWORKS']);
-  outputData.push(['Networks that need mapping entries in Network_Mapping sheet']);
-  outputData.push(['Add these to keep Advertiser and Account REP OPS data complete']);
-  outputData.push(['']); // Blank row
-  outputData.push(['📊 Total Unmapped: ' + items.length + ' network(s)']);
-  outputData.push(['']); // Blank row
-  
-  // Each unmapped network
-  items.forEach(function(item, index) {
-    const rank = index + 1;
-    outputData.push(['#' + rank + ' - ' + (item.networkName || 'ID: ' + item.networkId)]);
-    
-    const details = [];
-    if (item.networkId) details.push('Network ID: ' + item.networkId);
-    if (item.networkName) details.push('Network Name: ' + item.networkName);
-    details.push('Event Count: ' + item.count);
-    
-    outputData.push(['       ' + details.join(' | ')]);
-    outputData.push(['']); // Blank separator
+  // Build simple table matching Network_Mapping format for easy copy-paste
+  const headers = ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS', 'Event Count'];
+  const rows = items.map(function(item) {
+    return [
+      item.networkId || '',
+      item.networkName || '',
+      '',  // Advertiser - user will fill
+      '',  // Account REP OPS - user will fill
+      item.count
+    ];
   });
   
-  // Write to column A
-  if (outputData.length > 0) {
-    sheet.getRange(1, 1, outputData.length, 1).setValues(outputData);
-  }
-  
-  // Format
-  sheet.setColumnWidth(1, 900);
-  sheet.getRange(1, 1).setFontSize(14).setFontWeight('bold').setBackground('#ea4335').setFontColor('#ffffff');
-  sheet.getRange(2, 1, 2, 1).setFontSize(10).setFontStyle('italic').setBackground('#fce8e6');
-  sheet.getRange(1, 1, sheet.getMaxRows(), 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, headers, rows);
 }
 
 function parseDateSafe_(value) {
