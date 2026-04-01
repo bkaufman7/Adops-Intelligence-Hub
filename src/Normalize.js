@@ -5,8 +5,9 @@ function normalizeRawEvents_() {
     const deduped = dedupeExactFullRow_(rawRows);
     const missingMappingCounts = {};
 
-    const normalizedRows = deduped.map(function (row) {
-      return normalizeEventRow_(row, mapping, missingMappingCounts);
+    // Build row arrays directly to avoid double-pass conversion
+    const normalizedRowArrays = deduped.map(function (row) {
+      return normalizeEventRowToArray_(row, mapping, missingMappingCounts);
     });
 
     logMissingMappingsSummary_(missingMappingCounts);
@@ -14,19 +15,67 @@ function normalizeRawEvents_() {
     clearAndWriteTable_(
       SHEETS.NORMALIZED_LEDGER,
       NORMALIZED_LEDGER_COLUMNS,
-      normalizedRows.map(function (r) {
-        return toRow_(NORMALIZED_LEDGER_COLUMNS, r);
-      })
+      normalizedRowArrays
     );
 
     return {
       rawRows: rawRows.length,
       dedupedRows: deduped.length,
-      normalizedRows: normalizedRows.length,
+      normalizedRows: normalizedRowArrays.length,
       missingMappingGroups: Object.keys(missingMappingCounts).length,
       missingMappingCounts: missingMappingCounts
     };
   });
+}
+
+// Optimized version that builds row array directly without intermediate object
+function normalizeEventRowToArray_(row, mapping, missingMappingCounts) {
+  const eventDate = parseDateSafe_(row['Event Date']);
+  const networkId = String(row['Network ID'] || '').trim();
+  const networkNameRaw = String(row['Network Name'] || '').trim();
+  const networkNameLower = networkNameRaw.toLowerCase();
+  
+  const mapHit = mapping['id:' + networkId] || 
+                 mapping['name:' + networkNameLower] || 
+                 mapping['advertiser:' + networkNameLower] || 
+                 {};
+
+  if (!mapHit['Network ID'] && !mapHit['Network Name']) {
+    trackMissingMapping_(missingMappingCounts, networkId, networkNameRaw);
+  }
+
+  const eventDateValue = eventDate || row['Event Date'];
+  const eventWeek = eventDate ? formatWeek_(eventDate) : '';
+  const eventMonth = eventDate ? Utilities.formatDate(eventDate, Session.getScriptTimeZone(), 'yyyy-MM') : '';
+
+  // Return array matching NORMALIZED_LEDGER_COLUMNS order
+  return [
+    eventDateValue,                                      // Event Date
+    eventWeek,                                           // Event Week
+    eventMonth,                                          // Event Month
+    row['Source System'],                                // Source System
+    row['Source Project'],                               // Source Project
+    networkId,                                           // Network ID
+    row['Network Name'] || mapHit['Network Name'] || '', // Network Name
+    row['Advertiser'] || mapHit['Advertiser'] || '',     // Advertiser
+    row['Campaign'] || '',                               // Campaign
+    row['Placement ID'] || '',                           // Placement ID
+    row['Placement Name'] || '',                         // Placement Name
+    row['Issue Type Raw'] || '',                         // Issue Type
+    row['Issue Flags'] || row['Issue Type Raw'] || '',   // Issue Flags
+    row['Issue Detail'] || '',                           // Issue Detail
+    row['Impressions'] || '',                            // Impressions
+    row['Clicks'] || '',                                 // Clicks
+    row['Difference %'] || '',                           // Difference %
+    mapHit['Account REP OPS'] || '',                     // Account REP OPS
+    row['Source Email Link'] || '',                      // Source Email Link
+    row['Source File Link'] || '',                       // Source File Link
+    row['Full Row Hash'] || '',                          // Full Row Hash
+    row['Import Timestamp'] || new Date(),               // Imported At
+    '',                                                  // Also Flagged By (filled by cross-enrich)
+    '',                                                  // Cross Source Issue Flags (filled by cross-enrich)
+    ''                                                   // Cross Source Join Level (filled by cross-enrich)
+  ];
 }
 
 function normalizeEventRow_(row, mapping, missingMappingCounts) {
