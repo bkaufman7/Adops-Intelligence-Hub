@@ -11,6 +11,9 @@ function importFromConfiguredSources_() {
     const sources = getEnabledSources_();
     const imported = [];
     const failed = [];
+    
+    // Clear sheet and write header once before importing all sources
+    clearAndWriteTable_(SHEETS.RAW_IMPORTED_EVENTS, RAW_EVENT_COLUMNS, []);
 
     sources.forEach(function (sourceCfg) {
       const adapter = getSourceAdapter_(sourceCfg.sourceSystem);
@@ -23,13 +26,15 @@ function importFromConfiguredSources_() {
       try {
         const rows = adapter(sourceCfg);
         if (rows.length) {
-          appendRows_(
-            SHEETS.RAW_IMPORTED_EVENTS,
-            [RAW_EVENT_COLUMNS],
-            rows.map(function (r) {
-              return toRow_(RAW_EVENT_COLUMNS, r);
-            })
-          );
+          // Append data only (no headers) since we wrote header above
+          const dataRows = rows.map(function (r) {
+            return toRow_(RAW_EVENT_COLUMNS, r);
+          });
+          
+          const ss = SpreadsheetApp.getActive();
+          const sheet = ss.getSheetByName(SHEETS.RAW_IMPORTED_EVENTS);
+          const lastRow = sheet.getLastRow();
+          sheet.getRange(lastRow + 1, 1, dataRows.length, RAW_EVENT_COLUMNS.length).setValues(dataRows);
         }
 
         imported.push({ source: sourceCfg.sourceSystem, rowCount: rows.length });
