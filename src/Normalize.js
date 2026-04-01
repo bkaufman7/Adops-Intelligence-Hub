@@ -19,14 +19,12 @@ function normalizeRawEvents_() {
       })
     );
 
-    // Track unmapped networks for monitoring
-    writeUnmappedNetworksSummary_(missingMappingCounts);
-
     return {
       rawRows: rawRows.length,
       dedupedRows: deduped.length,
       normalizedRows: normalizedRows.length,
-      missingMappingGroups: Object.keys(missingMappingCounts).length
+      missingMappingGroups: Object.keys(missingMappingCounts).length,
+      missingMappingCounts: missingMappingCounts
     };
   });
 }

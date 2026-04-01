@@ -85,6 +85,15 @@ function runAllSummaries() {
       return buildRepGrading_();
     });
 
+    // Generate unmapped networks summary last (non-critical, skip if time runs out)
+    try {
+      if (result.normalizeRawEvents && result.normalizeRawEvents.missingMappingCounts) {
+        writeUnmappedNetworksSummary_(result.normalizeRawEvents.missingMappingCounts);
+      }
+    } catch (e) {
+      // Ignore errors - unmapped summary is nice-to-have
+    }
+
     return result;
   });
 }
