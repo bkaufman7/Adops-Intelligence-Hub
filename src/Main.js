@@ -62,16 +62,24 @@ function removeDailyTrigger() {
     return { success: true, triggersRemoved: removed };
   });
 }
-function runAllSummaries() {
+function runAllSummaries(skipCrossEnrich) {
   return withRunLogging_('runAllSummaries', function () {
     const result = {};
 
     result.normalizeRawEvents = runLoggedStep_('runAllSummaries', 'normalizeRawEvents_', function () {
       return normalizeRawEvents_();
     });
-    result.crossEnrichLedger = runLoggedStep_('runAllSummaries', 'crossEnrichLedger_', function () {
-      return crossEnrichLedger_();
-    });
+    
+    // Cross-enrichment adds "Also Flagged By" columns but takes 1-2 minutes
+    // Skip in fast mode to avoid timeouts
+    if (!skipCrossEnrich) {
+      result.crossEnrichLedger = runLoggedStep_('runAllSummaries', 'crossEnrichLedger_', function () {
+        return crossEnrichLedger_();
+      });
+    } else {
+      result.crossEnrichLedger = { skipped: true, reason: 'Fast mode - cross-enrichment disabled' };
+    }
+    
     result.buildSummaries = runLoggedStep_('runAllSummaries', 'buildSummaries_', function () {
       return buildSummaries_();
     });
@@ -96,6 +104,10 @@ function runAllSummaries() {
 
     return result;
   });
+}
+
+function runAllSummariesFast() {
+  return runAllSummaries(true);
 }
 
 function runFullRefresh() {
