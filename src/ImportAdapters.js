@@ -7,6 +7,20 @@ function importProject1Rows_(sourceCfg) {
   //   Source File Name | Source File Link | Network ID | Network Name |
   //   Placement Start Date | Placement End Date | Ad Type | Creative |
   //   Placement Pixel Size | Creative Pixel Size | Export Timestamp
+  
+  // Load Network_Mapping for lookups
+  const networkMappingData = readTable_(SHEETS.NETWORK_MAPPING);
+  const networkMap = {};
+  networkMappingData.slice(1).forEach(function(row) {
+    const netId = String(row[0] || '').trim();
+    const netName = String(row[1] || '').trim().toLowerCase();
+    const advertiser = String(row[2] || '').trim().toLowerCase();
+    const rep = String(row[3] || '').trim();
+    if (netId) networkMap['id:' + netId] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
+    if (netName) networkMap['name:' + netName] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
+    if (advertiser) networkMap['adv:' + advertiser] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
+  });
+  
   let externalSs;
   try {
     externalSs = SpreadsheetApp.openById(sourceCfg.spreadsheetId);
@@ -34,6 +48,29 @@ function importProject1Rows_(sourceCfg) {
     const data = {};
     headers.forEach(function (h, i) { data[h] = row[i]; });
 
+    // Extract raw values
+    let networkId = data['Network ID'] != null ? String(data['Network ID']).trim() : '';
+    const networkName = String(data['Network Name'] || data['Advertiser'] || '').trim();
+    const advertiser = String(data['Advertiser'] || '').trim();
+    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
+    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
+    
+    // Lookup Network ID and Account REP OPS from Network_Mapping if needed
+    let accountRepOps = '';
+    if (!networkId && networkName) {
+      // Lookup by network name
+      const mapHit = networkMap['name:' + networkName.toLowerCase()] || {};
+      networkId = mapHit.networkId || '';
+      accountRepOps = mapHit.rep || '';
+    } else if (networkId) {
+      // Lookup by network ID
+      const mapHit = networkMap['id:' + networkId] || {};
+      accountRepOps = mapHit.rep || '';
+    }
+    
+    // Calculate CTR as Difference %
+    const ctr = impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : 0;
+
     const event = {
       // Core event fields
       'Event Date':             data['Event Date'] || '',
@@ -44,35 +81,29 @@ function importProject1Rows_(sourceCfg) {
 
       // Provenance / email trail
       'Source Email Subject':   data['Source Email Subject'] || '',
-      'Source Email Link':      data['Source Email Link'] || '',
       'Source File Name':       data['Source File Name'] || '',
-      'Source File Link':       data['Source File Link'] || '',
 
       // Network / advertiser / placement
-      'Network ID':             data['Network ID'] || '',
-      'Network Name':           data['Network Name'] || data['Advertiser'] || '',  // Fallback to Advertiser
-      'Advertiser':             data['Advertiser'] || '',
+      'Network ID':             networkId,
+      'Network Name':           networkName,
+      'Advertiser':             advertiser,
       'Campaign':               data['Campaign'] || '',
-      'Placement ID':           data['Placement ID'] || '',
+      'Placement ID':           data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name':         data['Placement Name'] || '',
+      'Account REP OPS':        accountRepOps,
 
       // Issue fields
-      'Issue Type Raw':         '',           // CM360 export has no separate Issue Type column
       'Issue Flags':            data['Issue Flags'] || '',
       'Issue Detail':           '',
 
       // Metrics
-      'Impressions':            data['Impressions'] || '',
-      'Clicks':                 data['Clicks'] || '',
-      'Difference %':           '',
+      'Impressions':            impressions,
+      'Clicks':                 clicks,
+      'Difference %':           ctr,
 
       // CM360-specific fields promoted to flex slots
-      'Additional Metric 1':   data['Delivery Timestamp'] || '',   // Delivery Timestamp
-      'Additional Metric 2':   data['Ad Type'] || '',              // Ad Type
-
-      // Status / handling
-      'Status Raw':             '',
-      'Handled Notes':          '',
+      'Additional Metric 1':    data['Delivery Timestamp'] || '',   // Delivery Timestamp
+      'Additional Metric 2':    data['Ad Type'] || '',              // Ad Type
 
       // Timestamps
       'Export Timestamp':       data['Export Timestamp'] || '',
@@ -126,6 +157,14 @@ function importProject3Rows_(sourceCfg) {
     });
 
     const issueType = normalizeIssueText_(data['Issue Type'] || data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '');
+    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
+    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
+    
+    // Calculate CTR as Difference % if not provided
+    let diffPct = data['CTR (%)'] != null ? data['CTR (%)'] : (data['Difference %'] != null ? data['Difference %'] : 0);
+    if (!diffPct && impressions > 0) {
+      diffPct = ((clicks / impressions) * 100).toFixed(2);
+    }
 
     const event = {
       'Event Date': data['Report Date'] || data['Event Date'] || data['Date'] || '',
@@ -134,25 +173,21 @@ function importProject3Rows_(sourceCfg) {
       'Source Spreadsheet ID': sourceCfg.spreadsheetId,
       'Source Tab': sourceCfg.exportTab,
       'Source Email Subject': data['Source Email Subject'] || data['Email Subject'] || '',
-      'Source Email Link': data['Source Email Link'] || '',
       'Source File Name': data['Source File Name'] || '',
-      'Source File Link': data['Source File Link'] || '',
-      'Network ID': data['Network ID'] || '',
+      'Network ID': data['Network ID'] != null ? String(data['Network ID']) : '',
       'Network Name': data['Network Name'] || '',
       'Advertiser': data['Advertiser'] || data['Advertiser Name'] || '',
       'Campaign': data['Campaign'] || data['Campaign Name'] || '',
-      'Placement ID': data['Placement ID'] || '',
+      'Placement ID': data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name': data['Placement'] || data['Placement Name'] || '',
-      'Issue Type Raw': issueType,
+      'Account REP OPS': data['Owner (Ops)'] || '',
       'Issue Flags': issueType,
       'Issue Detail': data['Details'] || data['Issue Detail'] || '',
-      'Impressions': data['Impressions'] || '',
-      'Clicks': data['Clicks'] || '',
-      'Difference %': data['CTR (%)'] || data['Difference %'] || '',
+      'Impressions': impressions,
+      'Clicks': clicks,
+      'Difference %': diffPct,
       'Additional Metric 1': data['Flight Completion %'] || '',
       'Additional Metric 2': data['CPC Risk'] || '',
-      'Status Raw': data['Owner (Ops)'] || '',
-      'Handled Notes': '',
       'Export Timestamp': data['Export Timestamp'] || '',
       'Import Timestamp': importTimestamp,
       'Full Row Hash': '',
@@ -205,6 +240,13 @@ function importGenericRows_(sourceCfg, sourceSystem) {
     headers.forEach(function (h, i) {
       data[h] = row[i];
     });
+    
+    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
+    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
+    let diffPct = data['Difference %'] != null ? data['Difference %'] : 0;
+    if (!diffPct && impressions > 0) {
+      diffPct = ((clicks / impressions) * 100).toFixed(2);
+    }
 
     const event = {
       'Event Date': data['Event Date'] || data['Date'] || '',
@@ -213,25 +255,21 @@ function importGenericRows_(sourceCfg, sourceSystem) {
       'Source Spreadsheet ID': sourceCfg.spreadsheetId,
       'Source Tab': sourceCfg.exportTab,
       'Source Email Subject': data['Source Email Subject'] || data['Email Subject'] || '',
-      'Source Email Link': data['Source Email Link'] || '',
       'Source File Name': data['Source File Name'] || '',
-      'Source File Link': data['Source File Link'] || '',
-      'Network ID': data['Network ID'] || '',
+      'Network ID': data['Network ID'] != null ? String(data['Network ID']) : '',
       'Network Name': data['Network Name'] || '',
       'Advertiser': data['Advertiser'] || data['Advertiser Name'] || '',
       'Campaign': data['Campaign'] || data['Campaign Name'] || '',
-      'Placement ID': data['Placement ID'] || '',
+      'Placement ID': data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name': data['Placement Name'] || data['Placement'] || '',
-      'Issue Type Raw': data['Issue Type Raw'] || data['Issue Type'] || '',
+      'Account REP OPS': data['Account REP OPS'] || data['Owner (Ops)'] || '',
       'Issue Flags': data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '',
       'Issue Detail': data['Issue Detail'] || '',
-      'Impressions': data['Impressions'] || '',
-      'Clicks': data['Clicks'] || '',
-      'Difference %': data['Difference %'] || '',
+      'Impressions': impressions,
+      'Clicks': clicks,
+      'Difference %': diffPct,
       'Additional Metric 1': data['Additional Metric 1'] || '',
       'Additional Metric 2': data['Additional Metric 2'] || '',
-      'Status Raw': data['Status Raw'] || data['Status'] || '',
-      'Handled Notes': data['Handled Notes'] || '',
       'Export Timestamp': data['Export Timestamp'] || '',
       'Import Timestamp': importTimestamp,
       'Full Row Hash': '',
