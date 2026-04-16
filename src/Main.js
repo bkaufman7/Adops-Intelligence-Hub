@@ -330,13 +330,13 @@ function runAllSummariesFast() {
 }
 
 /**
- * One-button full pipeline:
- * 1. CVI Baseline refresh (inline, ~3-4 min)
- * 2. Source exports refresh (inline)
- * 3. Queue summaries + grading continuation chain
+ * One-button full pipeline (continuation-safe):
  *
- * After pressing this, the continuation chain runs automatically in the
- * background via time-based triggers. Full cycle takes ~10-15 min total.
+ * Stage 1 (this function): CVI Baseline only (~3-4 min), then queues Stage 2.
+ * Stage 2 (runBaselineRefreshContinuation): Source exports, then queues summaries/grading chain.
+ * Remaining stages: existing runFullRefreshContinuation → executive → presentation → grading chain.
+ *
+ * Each stage stays well under the 6-minute Apps Script limit.
  */
 function runBaselineAndFullRefresh() {
   return withRunLogging_('runBaselineAndFullRefresh', function () {
@@ -346,19 +346,37 @@ function runBaselineAndFullRefresh() {
       return refreshCviBaselineReference_();
     });
 
-    result.refreshSourceExports = runLoggedStep_('runBaselineAndFullRefresh', '2. Refresh Source Exports', function () {
-      return refreshSourceExports();
-    });
-
-    result.continuation = runLoggedStep_('runBaselineAndFullRefresh', '3. Queue Summaries + Grading Continuation', function () {
-      return queueRunFullRefreshContinuation_();
+    result.continuation = runLoggedStep_('runBaselineAndFullRefresh', '2. Queue Source Exports Continuation', function () {
+      return queueBaselineRefreshContinuation_();
     });
 
     logRun_('runBaselineAndFullRefresh', RUN_STATUS.SUCCESS,
-      '✅ Baseline + source refresh done. Summaries/grading queued via continuation chain.',
+      '✅ CVI Baseline done. Source exports + summaries/grading queued via continuation chain.',
       {
-        steps: 3,
         baselineResult: result.refreshCviBaseline,
+        nextStep: 'runBaselineRefreshContinuation triggers in ~60s'
+      }
+    );
+
+    return result;
+  });
+}
+
+function runBaselineRefreshContinuation() {
+  return withRunLogging_('runBaselineRefreshContinuation', function () {
+    const result = {};
+
+    result.refreshSourceExports = runLoggedStep_('runBaselineRefreshContinuation', '1. Refresh Source Exports', function () {
+      return refreshSourceExports();
+    });
+
+    result.continuation = runLoggedStep_('runBaselineRefreshContinuation', '2. Queue Summaries + Grading Continuation', function () {
+      return queueRunFullRefreshContinuation_();
+    });
+
+    logRun_('runBaselineRefreshContinuation', RUN_STATUS.SUCCESS,
+      '✅ Source exports done. Summaries/grading queued via continuation chain.',
+      {
         sourceResult: result.refreshSourceExports,
         nextStep: 'runFullRefreshContinuation triggers in ~60s, then executive/grading continuations follow automatically'
       }
@@ -366,6 +384,27 @@ function runBaselineAndFullRefresh() {
 
     return result;
   });
+}
+
+function queueBaselineRefreshContinuation_() {
+  const handlerName = 'runBaselineRefreshContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 60 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return { handler: handlerName, scheduledFor: runAt, delayMs: delayMs };
 }
 
 function runFullRefresh() {
