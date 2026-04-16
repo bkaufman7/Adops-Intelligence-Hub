@@ -1,3 +1,61 @@
+function toNumberOrZero_(value) {
+  if (value === '' || value === null || value === undefined) {
+    return 0;
+  }
+  const num = Number(value);
+  return isNaN(num) ? 0 : num;
+}
+
+function toCtrPercentOrBlank_(clicks, impressions) {
+  return impressions > 0 ? Number(((clicks / impressions) * 100).toFixed(2)) : '';
+}
+
+function isBlankImportedRow_(row) {
+  return !row || row.every(function (value) {
+    return value === '' || value === null || value === undefined;
+  });
+}
+
+function enrichWithNetworkMapping_(networkId, networkName, advertiser, accountRepOps, mapping) {
+  const lookup = mapping || buildNetworkMap_();
+  const normalizedId = String(networkId || '').trim();
+  const normalizedName = String(networkName || '').trim();
+  const normalizedAdvertiser = String(advertiser || '').trim();
+  const normalizedRep = String(accountRepOps || '').trim();
+  const mapHit = lookup['id:' + normalizedId] ||
+    lookup['name:' + normalizedName.toLowerCase()] ||
+    lookup['advertiser:' + normalizedAdvertiser.toLowerCase()] ||
+    {};
+
+  return {
+    networkId: normalizedId || String(mapHit['Network ID'] || '').trim(),
+    networkName: normalizedName || String(mapHit['Network Name'] || '').trim(),
+    advertiser: normalizedAdvertiser || String(mapHit['Advertiser'] || '').trim(),
+    accountRepOps: normalizedRep || String(mapHit['Account REP OPS'] || '').trim()
+  };
+}
+
+function getIssueTypeMode_() {
+  return String(PropertiesService.getScriptProperties().getProperty('ISSUE_TYPE_MODE') || 'RAW').toUpperCase();
+}
+
+function normalizeIssueTypeForMode_(text) {
+  const input = normalizeIssueText_(text);
+  if (!input) {
+    return '';
+  }
+  if (getIssueTypeMode_() !== 'CLEAN') {
+    return input;
+  }
+
+  return input
+    .replace(/\s*\([^)]*Low Priority[^)]*\)/gi, '')
+    .replace(/[🟥🟦🟨🟩🚨⚠️✅👍]/g, '')
+    .replace(/\b(BILLING|DELIVERY|PERFORMANCE|COST)\s*:\s*/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function importProject1Rows_(sourceCfg) {
   // Dedicated adapter for CM360 Audit System export.
   // Expected headers (26 columns):
@@ -7,19 +65,6 @@ function importProject1Rows_(sourceCfg) {
   //   Source File Name | Source File Link | Network ID | Network Name |
   //   Placement Start Date | Placement End Date | Ad Type | Creative |
   //   Placement Pixel Size | Creative Pixel Size | Export Timestamp
-  
-  // Load Network_Mapping for lookups
-  const networkMappingData = readTable_(SHEETS.NETWORK_MAPPING);
-  const networkMap = {};
-  networkMappingData.slice(1).forEach(function(row) {
-    const netId = String(row[0] || '').trim();
-    const netName = String(row[1] || '').trim().toLowerCase();
-    const advertiser = String(row[2] || '').trim().toLowerCase();
-    const rep = String(row[3] || '').trim();
-    if (netId) networkMap['id:' + netId] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
-    if (netName) networkMap['name:' + netName] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
-    if (advertiser) networkMap['adv:' + advertiser] = { networkId: netId, networkName: row[1], advertiser: row[2], rep: rep };
-  });
   
   let externalSs;
   try {
@@ -38,86 +83,62 @@ function importProject1Rows_(sourceCfg) {
     return [];
   }
 
-  const values = tab.getDataRange().getValues();
-  if (!values || values.length < 2) return [];
+  const range = tab.getDataRange();
+  const values = range ? range.getValues() : [];
+  if (!Array.isArray(values) || values.length < 2) return [];
 
   const headers = values[0].map(String);
   const importTimestamp = new Date();
+  const mapping = buildNetworkMap_();
 
-  return values.slice(1).map(function (row) {
+  const events = values.slice(1).filter(function (row) {
+    return !isBlankImportedRow_(row);
+  }).map(function (row) {
     const data = {};
     headers.forEach(function (h, i) { data[h] = row[i]; });
 
     // Extract raw values
-    let networkId = data['Network ID'] != null ? String(data['Network ID']).trim() : '';
+    const networkId = data['Network ID'] != null ? String(data['Network ID']).trim() : '';
     const networkName = String(data['Network Name'] || data['Advertiser'] || '').trim();
     const advertiser = String(data['Advertiser'] || '').trim();
-    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
-    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
-    
-    // Lookup Network ID and Account REP OPS from Network_Mapping if needed
-    let accountRepOps = '';
-    if (!networkId && networkName) {
-      // Lookup by network name
-      const mapHit = networkMap['name:' + networkName.toLowerCase()] || {};
-      networkId = mapHit.networkId || '';
-      accountRepOps = mapHit.rep || '';
-    } else if (networkId) {
-      // Lookup by network ID
-      const mapHit = networkMap['id:' + networkId] || {};
-      accountRepOps = mapHit.rep || '';
+    const impressions = toNumberOrZero_(data['Impressions']);
+    const clicks = toNumberOrZero_(data['Clicks']);
+    const enriched = enrichWithNetworkMapping_(networkId, networkName, advertiser, '', mapping);
+    const ctr = toCtrPercentOrBlank_(clicks, impressions);
+    const issueText = normalizeIssueText_(data['Issue Type'] || data['Issue Flags'] || '');
+
+    if (!issueText) {
+      return null;
     }
-    
-    // Calculate CTR as Difference %
-    const ctr = impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : 0;
 
     const event = {
-      // Core event fields
       'Event Date':             data['Event Date'] || '',
-      'Source System':          SOURCE_SYSTEMS.PROJECT_1_CM360_AUDIT,
       'Source Project':         sourceCfg.sourceProject || SOURCE_SYSTEMS.PROJECT_1_CM360_AUDIT,
-      'Source Spreadsheet ID':  sourceCfg.spreadsheetId,
-      'Source Tab':             sourceCfg.exportTab,
-
-      // Provenance / email trail
-      'Source Email Subject':   data['Source Email Subject'] || '',
-      'Source File Name':       data['Source File Name'] || '',
-
-      // Network / advertiser / placement
-      'Network ID':             networkId,
-      'Network Name':           networkName,
-      'Advertiser':             advertiser,
+      'Network ID':             enriched.networkId,
+      'Network Name':           enriched.networkName,
+      'Advertiser':             enriched.advertiser,
       'Campaign':               data['Campaign'] || '',
       'Placement ID':           data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name':         data['Placement Name'] || '',
-      'Account REP OPS':        accountRepOps,
-
-      // Issue fields
-      'Issue Flags':            data['Issue Flags'] || '',
+      'Issue Type':             issueText,
+      'Issue Flags':            issueText,
       'Issue Detail':           '',
-
-      // Metrics
       'Impressions':            impressions,
       'Clicks':                 clicks,
       'Difference %':           ctr,
-
-      // CM360-specific fields promoted to flex slots
-      'Additional Metric 1':    data['Delivery Timestamp'] || '',   // Delivery Timestamp
-      'Additional Metric 2':    data['Ad Type'] || '',              // Ad Type
-
-      // Timestamps
-      'Export Timestamp':       data['Export Timestamp'] || '',
+      'Account REP OPS':        enriched.accountRepOps,
+      'Source File Name':       data['Source File Name'] || sourceCfg.exportTab || 'CM360_Flagged_Export',
+      'Export Timestamp':       data['Export Timestamp'] || data['Event Date'] || importTimestamp,
       'Import Timestamp':       importTimestamp,
       'Full Row Hash':          '',
-
-      // Full fidelity — captures Config ID, Row ID, Placement Start/End Date,
-      // Creative, Placement Pixel Size, Creative Pixel Size, and any future columns
       'Raw JSON Snapshot':      JSON.stringify(data)
     };
 
     event['Full Row Hash'] = computeFullRowHash_(event);
     return event;
-  });
+  }).filter(Boolean);
+
+  return events;
 }
 
 function importProject2Rows_(sourceCfg) {
@@ -142,53 +163,63 @@ function importProject3Rows_(sourceCfg) {
     return [];
   }
 
-  const values = tab.getDataRange().getValues();
-  if (!values || values.length < 2) {
+  const range = tab.getDataRange();
+  const values = range ? range.getValues() : [];
+  if (!Array.isArray(values) || values.length < 2) {
     return [];
   }
 
   const headers = values[0].map(String);
   const importTimestamp = new Date();
+  const mapping = buildNetworkMap_();
 
-  return values.slice(1).map(function (row) {
+  const advertiserMismatches = {};
+
+  return values.slice(1).filter(function (row) {
+    return !isBlankImportedRow_(row);
+  }).map(function (row) {
     const data = {};
     headers.forEach(function (h, i) {
       data[h] = row[i];
     });
 
-    const issueType = normalizeIssueText_(data['Issue Type'] || data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '');
-    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
-    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
-    
-    // Calculate CTR as Difference % if not provided
-    let diffPct = data['CTR (%)'] != null ? data['CTR (%)'] : (data['Difference %'] != null ? data['Difference %'] : 0);
-    if (!diffPct && impressions > 0) {
-      diffPct = ((clicks / impressions) * 100).toFixed(2);
+    const issueType = normalizeIssueTypeForMode_(data['Issue Type'] || data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '');
+    const impressions = toNumberOrZero_(data['Impressions']);
+    const clicks = toNumberOrZero_(data['Clicks']);
+    const sourceCtr = data['CTR (%)'] != null ? String(data['CTR (%)']).trim() : '';
+    const diffPct = sourceCtr || toCtrPercentOrBlank_(clicks, impressions);
+    const sourceAdvertiser = String(data['Advertiser'] || data['Advertiser Name'] || '').trim();
+    const enriched = enrichWithNetworkMapping_(
+      data['Network ID'] != null ? String(data['Network ID']) : '',
+      data['Network Name'] || '',
+      sourceAdvertiser,
+      data['Owner (Ops)'] || '',
+      mapping
+    );
+
+    if (sourceAdvertiser && enriched.advertiser && sourceAdvertiser.toLowerCase() !== String(enriched.advertiser).toLowerCase()) {
+      const mismatchKey = [enriched.networkId || '', sourceAdvertiser, enriched.advertiser].join('||');
+      advertiserMismatches[mismatchKey] = (advertiserMismatches[mismatchKey] || 0) + 1;
     }
 
     const event = {
       'Event Date': data['Report Date'] || data['Event Date'] || data['Date'] || '',
-      'Source System': SOURCE_SYSTEMS.PROJECT_3_EOM,
       'Source Project': sourceCfg.sourceProject || SOURCE_SYSTEMS.PROJECT_3_EOM,
-      'Source Spreadsheet ID': sourceCfg.spreadsheetId,
-      'Source Tab': sourceCfg.exportTab,
-      'Source Email Subject': data['Source Email Subject'] || data['Email Subject'] || '',
-      'Source File Name': data['Source File Name'] || '',
-      'Network ID': data['Network ID'] != null ? String(data['Network ID']) : '',
-      'Network Name': data['Network Name'] || '',
-      'Advertiser': data['Advertiser'] || data['Advertiser Name'] || '',
+      'Network ID': enriched.networkId,
+      'Network Name': enriched.networkName,
+      'Advertiser': enriched.advertiser,
       'Campaign': data['Campaign'] || data['Campaign Name'] || '',
       'Placement ID': data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name': data['Placement'] || data['Placement Name'] || '',
-      'Account REP OPS': data['Owner (Ops)'] || '',
+      'Account REP OPS': enriched.accountRepOps,
+      'Issue Type': issueType,
       'Issue Flags': issueType,
       'Issue Detail': data['Details'] || data['Issue Detail'] || '',
       'Impressions': impressions,
       'Clicks': clicks,
       'Difference %': diffPct,
-      'Additional Metric 1': data['Flight Completion %'] || '',
-      'Additional Metric 2': data['CPC Risk'] || '',
-      'Export Timestamp': data['Export Timestamp'] || '',
+      'Source File Name': data['Source File Name'] || sourceCfg.exportTab || 'Violations',
+      'Export Timestamp': data['Export Timestamp'] || data['Report Date'] || data['Event Date'] || importTimestamp,
       'Import Timestamp': importTimestamp,
       'Full Row Hash': '',
       'Raw JSON Snapshot': JSON.stringify(data)
@@ -197,6 +228,27 @@ function importProject3Rows_(sourceCfg) {
     event['Full Row Hash'] = computeFullRowHash_(event);
     return event;
   });
+
+  const mismatchItems = Object.keys(advertiserMismatches).map(function (key) {
+    const parts = key.split('||');
+    return {
+      networkId: parts[0] || '',
+      sourceAdvertiser: parts[1] || '',
+      mappingAdvertiser: parts[2] || '',
+      count: advertiserMismatches[key]
+    };
+  }).sort(function (a, b) {
+    return b.count - a.count;
+  });
+
+  if (mismatchItems.length) {
+    logRun_('importProject3Rows_', RUN_STATUS.WARNING, 'Source advertiser differs from mapping advertiser', {
+      distinctMismatches: mismatchItems.length,
+      topMismatches: mismatchItems.slice(0, 20)
+    });
+  }
+
+  return events;
 }
 
 function normalizeIssueText_(value) {
@@ -227,50 +279,57 @@ function importGenericRows_(sourceCfg, sourceSystem) {
     return [];
   }
 
-  const values = tab.getDataRange().getValues();
-  if (!values || values.length < 2) {
+  const range = tab.getDataRange();
+  const values = range ? range.getValues() : [];
+  if (!Array.isArray(values) || values.length < 2) {
     return [];
   }
 
   const headers = values[0].map(String);
   const importTimestamp = new Date();
+  const mapping = buildNetworkMap_();
 
-  return values.slice(1).map(function (row) {
+  return values.slice(1).filter(function (row) {
+    return !isBlankImportedRow_(row);
+  }).map(function (row) {
     const data = {};
     headers.forEach(function (h, i) {
       data[h] = row[i];
     });
     
-    const impressions = data['Impressions'] != null ? data['Impressions'] : 0;
-    const clicks = data['Clicks'] != null ? data['Clicks'] : 0;
-    let diffPct = data['Difference %'] != null ? data['Difference %'] : 0;
-    if (!diffPct && impressions > 0) {
-      diffPct = ((clicks / impressions) * 100).toFixed(2);
+    const impressions = toNumberOrZero_(data['Impressions']);
+    const clicks = toNumberOrZero_(data['Clicks']);
+    const enriched = enrichWithNetworkMapping_(
+      data['Network ID'] != null ? String(data['Network ID']) : '',
+      data['Network Name'] || '',
+      data['Advertiser'] || data['Advertiser Name'] || '',
+      data['Account REP OPS'] || data['Owner (Ops)'] || '',
+      mapping
+    );
+    let issueType = normalizeIssueText_(data['Issue Type'] || data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '');
+    if (!issueType && sourceSystem === SOURCE_SYSTEMS.PROJECT_2_CVI) {
+      issueType = 'CVI_CLICKS_GT_IMPRESSIONS';
     }
+    const diffPct = toCtrPercentOrBlank_(clicks, impressions);
 
     const event = {
       'Event Date': data['Event Date'] || data['Date'] || '',
-      'Source System': sourceSystem,
       'Source Project': sourceCfg.sourceProject || sourceSystem,
-      'Source Spreadsheet ID': sourceCfg.spreadsheetId,
-      'Source Tab': sourceCfg.exportTab,
-      'Source Email Subject': data['Source Email Subject'] || data['Email Subject'] || '',
-      'Source File Name': data['Source File Name'] || '',
-      'Network ID': data['Network ID'] != null ? String(data['Network ID']) : '',
-      'Network Name': data['Network Name'] || '',
-      'Advertiser': data['Advertiser'] || data['Advertiser Name'] || '',
+      'Network ID': enriched.networkId,
+      'Network Name': enriched.networkName,
+      'Advertiser': enriched.advertiser,
       'Campaign': data['Campaign'] || data['Campaign Name'] || '',
       'Placement ID': data['Placement ID'] != null ? String(data['Placement ID']) : '',
       'Placement Name': data['Placement Name'] || data['Placement'] || '',
-      'Account REP OPS': data['Account REP OPS'] || data['Owner (Ops)'] || '',
-      'Issue Flags': data['Issue Flags'] || data['Flag(s)'] || data['Issue(s)'] || '',
+      'Issue Type': issueType,
+      'Issue Flags': issueType,
       'Issue Detail': data['Issue Detail'] || '',
       'Impressions': impressions,
       'Clicks': clicks,
       'Difference %': diffPct,
-      'Additional Metric 1': data['Additional Metric 1'] || '',
-      'Additional Metric 2': data['Additional Metric 2'] || '',
-      'Export Timestamp': data['Export Timestamp'] || '',
+      'Account REP OPS': enriched.accountRepOps,
+      'Source File Name': data['Source File Name'] || sourceCfg.exportTab || 'Output',
+      'Export Timestamp': data['Export Timestamp'] || data['Event Date'] || data['Date'] || importTimestamp,
       'Import Timestamp': importTimestamp,
       'Full Row Hash': '',
       'Raw JSON Snapshot': JSON.stringify(data)

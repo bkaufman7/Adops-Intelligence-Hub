@@ -25,6 +25,9 @@ function importFromConfiguredSources_() {
 
       try {
         const rows = adapter(sourceCfg);
+        if (!Array.isArray(rows)) {
+          throw new Error('Adapter did not return an array for source ' + sourceCfg.sourceSystem);
+        }
         if (rows.length) {
           // Append data only (no headers) since we wrote header above
           const dataRows = rows.map(function (r) {

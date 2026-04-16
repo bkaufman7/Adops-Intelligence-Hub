@@ -44,37 +44,23 @@ function normalizeEventRowToArray_(row, mapping, missingMappingCounts) {
     trackMissingMapping_(missingMappingCounts, networkId, networkNameRaw);
   }
 
-  const eventDateValue = eventDate || row['Event Date'];
-  const eventWeek = eventDate ? formatWeek_(eventDate) : '';
-  const eventMonth = eventDate ? Utilities.formatDate(eventDate, Session.getScriptTimeZone(), 'yyyy-MM') : '';
-
   // Return array matching NORMALIZED_LEDGER_COLUMNS order
   return [
-    eventDateValue,                                      // Event Date
-    eventWeek,                                           // Event Week
-    eventMonth,                                          // Event Month
-    row['Source System'],                                // Source System
+    eventDate || row['Event Date'],                      // Event Date
     row['Source Project'],                               // Source Project
-    networkId,                                           // Network ID
-    row['Network Name'] || mapHit['Network Name'] || '', // Network Name
-    row['Advertiser'] || mapHit['Advertiser'] || '',     // Advertiser
+    networkId || String(mapHit['Network ID'] || '').trim(),
+    row['Network Name'] || mapHit['Network Name'] || '',
+    row['Advertiser'] || mapHit['Advertiser'] || '',
     row['Campaign'] || '',                               // Campaign
     row['Placement ID'] || '',                           // Placement ID
     row['Placement Name'] || '',                         // Placement Name
-    row['Issue Type Raw'] || '',                         // Issue Type
-    row['Issue Flags'] || row['Issue Type Raw'] || '',   // Issue Flags
+    row['Issue Type'] || row['Issue Flags'] || '',       // Issue Type
+    row['Issue Flags'] || row['Issue Type'] || '',       // Issue Flags
     row['Issue Detail'] || '',                           // Issue Detail
-    row['Impressions'] || '',                            // Impressions
-    row['Clicks'] || '',                                 // Clicks
-    row['Difference %'] || '',                           // Difference %
-    mapHit['Account REP OPS'] || '',                     // Account REP OPS
-    row['Source Email Link'] || '',                      // Source Email Link
-    row['Source File Link'] || '',                       // Source File Link
-    row['Full Row Hash'] || '',                          // Full Row Hash
-    row['Import Timestamp'] || new Date(),               // Imported At
-    '',                                                  // Also Flagged By (filled by cross-enrich)
-    '',                                                  // Cross Source Issue Flags (filled by cross-enrich)
-    ''                                                   // Cross Source Join Level (filled by cross-enrich)
+    getValueOrZero_(row['Impressions']),                 // Impressions
+    getValueOrZero_(row['Clicks']),                      // Clicks
+    getValueOrZero_(row['Difference %']),                // Difference %
+    row['Account REP OPS'] || mapHit['Account REP OPS'] || ''
   ];
 }
 
@@ -93,28 +79,28 @@ function normalizeEventRow_(row, mapping, missingMappingCounts) {
 
   return {
     'Event Date': eventDate || row['Event Date'],
-    'Event Week': eventDate ? formatWeek_(eventDate) : '',
-    'Event Month': eventDate ? Utilities.formatDate(eventDate, Session.getScriptTimeZone(), 'yyyy-MM') : '',
-    'Source System': row['Source System'],
     'Source Project': row['Source Project'],
-    'Network ID': networkId,
+    'Network ID': networkId || String(mapHit['Network ID'] || '').trim(),
     'Network Name': row['Network Name'] || mapHit['Network Name'] || '',
     'Advertiser': row['Advertiser'] || mapHit['Advertiser'] || '',
     'Campaign': row['Campaign'] || '',
     'Placement ID': row['Placement ID'] || '',
     'Placement Name': row['Placement Name'] || '',
-    'Issue Type': row['Issue Type Raw'] || '',
-    'Issue Flags': row['Issue Flags'] || row['Issue Type Raw'] || '',
+    'Issue Type': row['Issue Type'] || row['Issue Flags'] || '',
+    'Issue Flags': row['Issue Flags'] || row['Issue Type'] || '',
     'Issue Detail': row['Issue Detail'] || '',
-    'Impressions': row['Impressions'] || '',
-    'Clicks': row['Clicks'] || '',
-    'Difference %': row['Difference %'] || '',
-    'Account REP OPS': mapHit['Account REP OPS'] || '',
-    'Source Email Link': row['Source Email Link'] || '',
-    'Source File Link': row['Source File Link'] || '',
-    'Full Row Hash': row['Full Row Hash'] || '',
-    'Imported At': row['Import Timestamp'] || new Date()
+    'Impressions': getValueOrZero_(row['Impressions']),
+    'Clicks': getValueOrZero_(row['Clicks']),
+    'Difference %': getValueOrZero_(row['Difference %']),
+    'Account REP OPS': row['Account REP OPS'] || mapHit['Account REP OPS'] || ''
   };
+}
+
+function getValueOrZero_(value) {
+  if (value === '' || value === null || value === undefined) {
+    return 0;
+  }
+  return value;
 }
 
 function trackMissingMapping_(missingMappingCounts, networkId, networkName) {

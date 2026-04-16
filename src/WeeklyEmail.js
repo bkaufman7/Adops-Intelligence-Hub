@@ -40,8 +40,8 @@ function buildWeeklyEmailHtml_(systemSummary, networkSummary, issueSummary) {
   return [
     '<h2>AdOps Intelligence Hub - Weekly Summary</h2>',
     '<p>This email is summary-focused. Event-level detail is available in sheets and optional Drive exports.</p>',
-    '<h3>System Activity</h3>',
-    tableHtml_(systemSummary, ['Source System', 'Issue Count']),
+    '<h3>Project Activity</h3>',
+    tableHtml_(systemSummary, ['Source Project', 'Issue Count']),
     '<h3>Top Networks / Clients</h3>',
     tableHtml_(networkSummary, ['Network Name', 'Issue Count']),
     '<h3>Issue Type Breakdown</h3>',

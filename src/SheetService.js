@@ -8,10 +8,32 @@ function getOrCreateSheet_(name) {
 }
 
 function clearAndWriteTable_(sheetName, headers, rows) {
+  return clearAndWriteTableChunked_(sheetName, headers, rows, 1000);
+}
+
+function clearAndWriteTableChunked_(sheetName, headers, rows, chunkSize) {
   const sheet = getOrCreateSheet_(sheetName);
-  sheet.clearContents();
-  const values = [headers].concat(rows || []);
-  sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+  const safeRows = rows || [];
+  const safeChunkSize = Math.max(100, Number(chunkSize) || 1000);
+
+  runSheetWriteWithRetry_('clearAndWriteTable_(' + sheetName + ')', function () {
+    sheet.clearContents();
+
+    // Always write headers first, then chunk data rows to avoid one massive setValues call.
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+    if (!safeRows.length) {
+      return;
+    }
+
+    var start = 0;
+    while (start < safeRows.length) {
+      var chunk = safeRows.slice(start, start + safeChunkSize);
+      var startRow = start + 2;
+      sheet.getRange(startRow, 1, chunk.length, headers.length).setValues(chunk);
+      start += chunk.length;
+    }
+  });
 }
 
 function appendRows_(sheetName, headers, rows) {
@@ -51,4 +73,25 @@ function toRow_(headers, obj) {
   return headers.map(function (header) {
     return obj[header] !== undefined ? obj[header] : '';
   });
+}
+
+function runSheetWriteWithRetry_(label, fn) {
+  const maxAttempts = 4;
+
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const isRetryable = isRetryableSpreadsheetError_(err);
+      if (!isRetryable || attempt === maxAttempts) {
+        throw err;
+      }
+      Utilities.sleep(attempt * 350);
+    }
+  }
+}
+
+function isRetryableSpreadsheetError_(err) {
+  const message = String(err || '');
+  return /timed out|Service Spreadsheets|internal error|try again/i.test(message);
 }

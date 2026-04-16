@@ -1,11 +1,11 @@
 /**
  * GradingService.js
  * 
- * Calculates network performance grades based on:
+ * Calculates network diagnostic grades based on:
  * - Total violation count
  * - Issue-per-placement ratio
  * 
- * Vertical layout optimized for easy scanning down the list.
+ * This is a secondary diagnostic view (issue-density lens), not primary performance grading.
  */
 
 function buildNetworkGrading_() {
@@ -74,8 +74,8 @@ function buildNetworkGrading_() {
     return b.uniqueIssues - a.uniqueIssues;
   });
 
-  // Write to sheet in single-column format
-  writeSingleColumnGrading_(gradeData);
+  // Write to sheet in tabular format
+  writeNetworkGradingTable_(gradeData);
 
   logRun_('buildNetworkGrading_', RUN_STATUS.SUCCESS, 'Completed', {
     networksGraded: gradeData.length,
@@ -101,87 +101,118 @@ function calculateGrade_(issueRate) {
   return 'F';
 }
 
-function writeSingleColumnGrading_(gradeData) {
-  const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(SHEETS.NETWORK_GRADING);
-  
-  // Clear or create sheet
-  if (sheet) {
-    sheet.clear();
-  } else {
-    sheet = ss.insertSheet(SHEETS.NETWORK_GRADING);
-  }
-  
-  // Build single-column format
-  const outputData = [];
-  
-  // Header
-  outputData.push(['📊 NETWORK PERFORMANCE GRADING']);
-  outputData.push(['Ranked by Unique Issues (Highest to Lowest)']);
-  outputData.push(['']); // Blank row
-  
-  // Each network gets multiple rows
-  gradeData.forEach(function(network, index) {
-    const rank = index + 1;
-    const rankEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '  ';
-    
-    // Main row: Rank + Network Name + Grade
-    const gradeEmoji = getGradeEmoji_(network.grade);
-    outputData.push([rankEmoji + ' #' + rank + ' - ' + network.networkName + ' [Grade: ' + network.grade + ' ' + gradeEmoji + ']']);
-    
-    // Details row - show unique issues (not total events)
-    const issueRateText = network.placementCount > 0 ? 
-      network.issueRate.toFixed(2) + ' unique issues per placement' : 
-      'No placements tracked';
-    outputData.push(['       🚨 ' + network.uniqueIssues + ' unique issues (' + network.totalEvents + ' total events)  |  📍 ' + network.placementCount + ' placements  |  ' + issueRateText]);
-    
-    // Blank separator
-    outputData.push(['']);
+function networkGradingHeaders_() {
+  return [
+    'Rank',
+    'Network',
+    'Grade (Diagnostic)',
+    'Unique Issues',
+    'Total Issue Events',
+    'Unique Flagged Placements',
+    'Issues per Placement'
+  ];
+}
+
+function writeNetworkGradingTable_(gradeData) {
+  const headers = networkGradingHeaders_();
+  const tableRows = gradeData.map(function (item, index) {
+    return [
+      index + 1,
+      item.networkName,
+      item.grade,
+      item.uniqueIssues,
+      item.totalEvents,
+      item.placementCount,
+      item.placementCount > 0 ? item.issueRate.toFixed(2) : 'N/A'
+    ];
   });
-  
-  // Write all data to column A
-  if (outputData.length > 0) {
-    sheet.getRange(1, 1, outputData.length, 1).setValues(outputData);
-  }
-  
-  // Apply formatting
-  formatSingleColumnGrading_(sheet, gradeData.length);
+
+  clearAndWriteTable_(SHEETS.NETWORK_GRADING, headers, tableRows);
+  formatNetworkGradingTable_(tableRows.length, tableRows);
 }
 
-function getGradeEmoji_(grade) {
-  switch(grade) {
-    case 'A': return '✅';
-    case 'B': return '👍';
-    case 'C': return '⚠️';
-    case 'D': return '⚠️';
-    case 'F': return '🚨';
-    default: return '';
+function formatNetworkGradingTable_(rowCount, tableRows) {
+  const sheet = getOrCreateSheet_(SHEETS.NETWORK_GRADING);
+  const colCount = 7;
+  const gradeCol = 3;
+
+  sheet.setFrozenRows(1);
+  for (var c = 1; c <= colCount; c++) {
+    sheet.setColumnWidth(c, c === 2 ? 280 : 160);
   }
+
+  sheet.getRange(1, 1, 1, colCount)
+    .setFontWeight('bold')
+    .setBackground('#1f4e78')
+    .setFontColor('#ffffff');
+
+  applyNetworkHeaderNotes_(sheet, colCount);
+  writeNetworkGradingLegend_(sheet, colCount);
+
+  if (rowCount <= 0) {
+    return;
+  }
+
+  const rowsRange = sheet.getRange(2, 1, rowCount, colCount);
+  rowsRange.setFontSize(9);
+
+  const rowsData = tableRows || sheet.getRange(2, 1, rowCount, colCount).getValues();
+  const gradeBackgrounds = [];
+  const gradeFontColors = [];
+
+  for (var i = 0; i < rowsData.length; i++) {
+    const grade = String(rowsData[i][gradeCol - 1] || '').trim();
+    let bg = '#ffffff';
+    let fg = '#000000';
+    if (grade === 'A') { bg = '#d9ead3'; fg = '#274e13'; }
+    else if (grade === 'B') { bg = '#eaf3ff'; fg = '#1f4e78'; }
+    else if (grade === 'C') { bg = '#fff2cc'; fg = '#7f6000'; }
+    else if (grade === 'D') { bg = '#fce5cd'; fg = '#783f04'; }
+    else if (grade === 'F') { bg = '#f4cccc'; fg = '#990000'; }
+    gradeBackgrounds.push([bg]);
+    gradeFontColors.push([fg]);
+  }
+
+  sheet.getRange(2, gradeCol, rowCount, 1).setBackgrounds(gradeBackgrounds).setFontColors(gradeFontColors);
 }
 
-function formatSingleColumnGrading_(sheet, networkCount) {
-  // Set column A width
-  sheet.setColumnWidth(1, 800);
-  
-  // Format header (rows 1-2)
-  sheet.getRange(1, 1).setFontSize(14).setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
-  sheet.getRange(2, 1).setFontSize(10).setFontStyle('italic').setBackground('#e8f0fe');
-  
-  // Format each network entry
-  let currentRow = 4; // Start after header + blank row
-  for (let i = 0; i < networkCount; i++) {
-    // Main network row (bold)
-    sheet.getRange(currentRow, 1).setFontWeight('bold').setFontSize(11);
-    
-    // Details row (smaller, grey)
-    sheet.getRange(currentRow + 1, 1).setFontSize(9).setFontColor('#666666');
-    
-    currentRow += 3; // Jump to next network (name + details + blank)
-  }
-  
-  // Wrap text for all cells
-  sheet.getRange(1, 1, sheet.getMaxRows(), 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-  
-  // Freeze header rows
-  sheet.setFrozenRows(3);
+function applyNetworkHeaderNotes_(sheet, colCount) {
+  const notesByHeader = {
+    'Rank': 'Position after sorting by Unique Issues (descending).',
+    'Network': 'Normalized network name from the event ledger.',
+    'Grade (Diagnostic)': 'Secondary diagnostic grade based on issue density (not the primary performance KPI).',
+    'Unique Issues': 'Distinct placement+issue fingerprint combinations for the network.',
+    'Total Issue Events': 'Total event rows associated with the network.',
+    'Unique Flagged Placements': 'Unique placements with at least one flagged event for the network.',
+    'Issues per Placement': 'Diagnostic density metric = Unique Issues / Unique Flagged Placements.'
+  };
+
+  const headers = sheet.getRange(1, 1, 1, colCount).getValues()[0];
+  const notes = headers.map(function (h) {
+    return notesByHeader[String(h || '').trim()] || '';
+  });
+  sheet.getRange(1, 1, 1, colCount).setNotes([notes]);
+}
+
+function writeNetworkGradingLegend_(sheet, dataLastCol) {
+  const legendStartCol = dataLastCol + 3;
+  const rows = [
+    ['Grade (Diagnostic)', 'Issue-density diagnostic grade for network-level troubleshooting.'],
+    ['Unique Issues', 'Distinct placement+issue fingerprint combinations.'],
+    ['Total Issue Events', 'Total number of issue events observed for the network.'],
+    ['Unique Flagged Placements', 'Unique placements with at least one issue event.'],
+    ['Issues per Placement', 'Unique Issues divided by Unique Flagged Placements.'],
+    ['Important', 'Network_Grading is a secondary diagnostic lens, not the primary leadership grading KPI.']
+  ];
+
+  sheet.getRange(1, legendStartCol, 80, 2).clearContent().clearFormat();
+  sheet.getRange(1, legendStartCol).setValue('Legend').setFontWeight('bold').setFontSize(11);
+  sheet.getRange(2, legendStartCol, 1, 2)
+    .setValues([['Column / Metric', 'Meaning']])
+    .setFontWeight('bold')
+    .setBackground('#d9e1f2');
+  sheet.getRange(3, legendStartCol, rows.length, 2).setValues(rows).setWrap(true);
+
+  sheet.setColumnWidth(legendStartCol, 220);
+  sheet.setColumnWidth(legendStartCol + 1, 420);
 }

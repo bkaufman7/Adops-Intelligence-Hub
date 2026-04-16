@@ -17,6 +17,10 @@
 
 function crossEnrichLedger_() {
   return withRunLogging_('crossEnrichLedger_', function () {
+    if (NORMALIZED_LEDGER_COLUMNS.indexOf('Also Flagged By') === -1) {
+      return { total: 0, enriched: 0, skipped: true, reason: 'Lean ledger mode does not include cross-enrichment columns' };
+    }
+
     const rows = readTable_(SHEETS.NORMALIZED_LEDGER);
     if (!rows || rows.length === 0) return { total: 0, enriched: 0 };
 

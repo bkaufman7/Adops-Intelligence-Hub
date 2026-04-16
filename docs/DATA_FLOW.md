@@ -1,10 +1,10 @@
-# AdOps Intelligence Hub - Data Flow Architecture
+# AdOps Intelligence Hub Data Flow Architecture
 
 **Last Updated:** March 30, 2026
 
 ---
 
-## 🔄 Full Refresh Workflow (`runFullRefresh()`)
+## Full Refresh Workflow (runFullRefresh)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -88,7 +88,7 @@
 
 ---
 
-## 🔑 Network_Mapping Tab - THE CRITICAL LOOKUP TABLE
+## Network Mapping Tab - Critical Lookup Table
 
 ### **Current Flow (FIXED):**
 ```
@@ -136,7 +136,7 @@ External Spreadsheet (Project 3/EOM)
 
 ---
 
-## ✅ **ISSUE RESOLVED**
+## Issue Resolved
 
 ### **Root Cause Identified:**
 The Project 3 Networks tab has multiple data sets:
@@ -158,7 +158,7 @@ Updated `refreshNetworkMapping()` to:
 
 ---
 
-## 🎯 **Next Steps:**
+## Next Steps
 
 1. **Test the fix:**
    - Go to your Hub spreadsheet

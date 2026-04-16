@@ -15,9 +15,7 @@ function logRun_(action, status, message, context) {
     context ? JSON.stringify(context) : ''
   ];
 
-  appendRows_(SHEETS.RUN_LOG, [['Timestamp', 'Action', 'Status', 'Message', 'Context']], [row]);
-
-  // Mirror sheet logs into Apps Script execution logs for faster debugging.
+  // Mirror logs into Apps Script execution logs first for faster debugging.
   const serialized = JSON.stringify(logPayload);
   if (status === RUN_STATUS.ERROR || status === RUN_STATUS.WARNING) {
     console.error(serialized);
@@ -25,6 +23,9 @@ function logRun_(action, status, message, context) {
     console.log(serialized);
   }
   Logger.log(serialized);
+
+  // Best-effort write to Run_Log sheet. Do not throw if Sheets is temporarily busy.
+  appendRunLogRowWithRetry_(row);
 }
 
 function withRunLogging_(action, fn) {
@@ -34,7 +35,28 @@ function withRunLogging_(action, fn) {
     logRun_(action, RUN_STATUS.SUCCESS, 'Completed', result || null);
     return result;
   } catch (err) {
-    logRun_(action, RUN_STATUS.ERROR, String(err), { stack: err && err.stack ? err.stack : '' });
+    // Never let logging failures mask the original pipeline error.
+    try {
+      logRun_(action, RUN_STATUS.ERROR, String(err), { stack: err && err.stack ? err.stack : '' });
+    } catch (loggingErr) {
+      console.error('Failed to write run log: ' + String(loggingErr));
+    }
     throw err;
+  }
+}
+
+function appendRunLogRowWithRetry_(row) {
+  const maxAttempts = 3;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      appendRows_(SHEETS.RUN_LOG, [['Timestamp', 'Action', 'Status', 'Message', 'Context']], [row]);
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        console.error('Run_Log append failed after retries: ' + String(err));
+        return;
+      }
+      Utilities.sleep(attempt * 250);
+    }
   }
 }

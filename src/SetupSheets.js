@@ -3,6 +3,7 @@ function setupProjectSheets() {
     seedReadmeSheet_();
     seedInstructionsSheet_();
     seedArchitectureMapSheet_();
+    seedDataContractSheet_();
     seedConfigSheet_();
     seedWeeklyRecipientsSheet_();
     seedProjectAccountsSheet_();
@@ -11,6 +12,30 @@ function setupProjectSheets() {
     getOrCreateSheet_(SHEETS.UI_CONTROL);
     return { success: true };
   });
+}
+
+function seedDataContractSheet_() {
+  clearAndWriteTable_(
+    SHEETS.DATA_CONTRACT,
+    ['Source Project', 'Type', 'Field', 'Hub Usage', 'Rule / Notes'],
+    [
+      ['CM360 Audit System', 'Ingest', 'Event Date', 'Required', 'Copied from source export tab'],
+      ['CM360 Audit System', 'Ingest', 'Network ID', 'Required', 'Backfilled from Network_Mapping when missing'],
+      ['CM360 Audit System', 'Ingest', 'Issue Flags', 'Required', 'Rows with blank issue flags are skipped'],
+      ['CM360 Audit System', 'Compute', 'Difference %', 'Required', 'CTR = (Clicks / Impressions) * 100; blank when impressions <= 0'],
+      ['Daily CVI Catch', 'Ingest', 'Output tab', 'Required', 'Flag rows only from Output tab'],
+      ['Daily CVI Catch', 'Ingest', 'Data tab snapshot', 'Reference only', 'Captured to CVI_Daily_Baseline for cross-reference'],
+      ['Daily CVI Catch', 'Compute', 'Issue Type', 'Required', 'Defaults to CVI_CLICKS_GT_IMPRESSIONS when not provided'],
+      ['Daily CVI Catch', 'Compute', 'Difference %', 'Required', 'CTR computed from clicks/impressions; blank when impressions <= 0'],
+      ['End-of-Month Tracker', 'Ingest', 'Violations tab', 'Required', 'Primary source for violations and owner mapping'],
+      ['End-of-Month Tracker', 'Ingest', 'Owner (Ops)', 'Required', 'Source of truth for Account REP OPS'],
+      ['End-of-Month Tracker', 'Ingest', 'Issue Type', 'Required', 'Kept as-is by default; optional clean mode toggle available'],
+      ['End-of-Month Tracker', 'Ingest', 'CTR (%)', 'Required', 'Trusted from source when present'],
+      ['End-of-Month Tracker', 'Validation', 'Advertiser mismatch', 'Warning', 'Logs warning when source advertiser differs from mapping advertiser'],
+      ['All Sources', 'Storage', 'Raw_Imported_Events', 'Operational', 'Lean schema for performance and reporting clarity'],
+      ['All Sources', 'Storage', 'Normalized_Event_Ledger', 'Operational', 'Canonical columns used by summaries, trends, and grading']
+    ]
+  );
 }
 
 function seedReadmeSheet_() {
@@ -106,15 +131,128 @@ function seedDataSheets_() {
   clearAndWriteTable_(SHEETS.RAW_IMPORTED_EVENTS, RAW_EVENT_COLUMNS, []);
   clearAndWriteTable_(SHEETS.NORMALIZED_LEDGER, NORMALIZED_LEDGER_COLUMNS, []);
   clearAndWriteTable_(SHEETS.IMPORTED_NETWORK_SUMMARIES, ['Event Date', 'Source System', 'Network ID', 'Network Name', 'Metric Name', 'Metric Value'], []);
-  clearAndWriteTable_(SHEETS.SUMMARY_BY_SYSTEM, ['Source System', 'Issue Count'], []);
+  clearAndWriteTable_(SHEETS.SUMMARY_BY_SYSTEM, ['Source Project', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.SUMMARY_BY_NETWORK, ['Network Name', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.SUMMARY_BY_ISSUE_TYPE, ['Issue Flags', 'Issue Count'], []);
+  clearAndWriteTable_(SHEETS.EXECUTIVE_SNAPSHOT, ['Section', 'Metric', 'Value', 'Status'], []);
+  clearAndWriteTable_(SHEETS.PRESENTATION_VIEW, ['Leadership Snapshot'], []);
   clearAndWriteTable_(SHEETS.NETWORK_GRADING, ['Network Name', 'Total Issues (All Time)', 'Unique Placements', 'Issues Per Placement', 'Grade', 'Trend', 'Last 7 Days', 'Last 30 Days', 'Avg Issues Per Day (30d)'], []);
+  clearAndWriteTable_(SHEETS.GRADING_METHODOLOGY, ['Section', 'Metric', 'Value', 'Notes'], []);
   clearAndWriteTable_(SHEETS.REP_GRADING, ['AdOps Rep Performance Grading'], []);
+  clearAndWriteTable_(SHEETS.REP_GRADING_DIAGNOSTIC, ['Rep Issue Density Diagnostic'], []);
+  clearAndWriteTable_(SHEETS.ADVERTISER_GRADING, ['Advertiser Performance Grading'], []);
   clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, ['Unmapped Networks'], []);
-  clearAndWriteTable_(SHEETS.TREND_WEEKLY, ['Event Week', 'Source System', 'Issue Count'], []);
-  clearAndWriteTable_(SHEETS.TREND_MONTHLY, ['Event Month', 'Source System', 'Issue Count'], []);
+  clearAndWriteTable_(SHEETS.TREND_WEEKLY, ['Event Week', 'Source Project', 'Issue Count'], []);
+  clearAndWriteTable_(SHEETS.TREND_MONTHLY, ['Event Month', 'Source Project', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context'], []);
+  writeTabLegendSheet_();
+}
+
+function writeTabLegendSheet_() {
+  var rows = [
+    ['🟢 Green',      'Leadership',  'Executive Snapshot, Presentation View',                          'Audience: leadership / stakeholders'],
+    ['🟣 Purple',     'Grading',     'Rep Grading, Advertiser Grading, Network Grading, Diagnostic, Methodology', 'Audience: ops managers'],
+    ['🟠 Orange',     'Summaries',   'Summary By System, By Network, By Issue Type',                  'Audience: ops team'],
+    ['🔵 Teal',       'Trends',      'Trend Weekly, Trend Monthly',                                   'Audience: ops / leadership'],
+    ['⚫ Grey',       'Raw Data',    'Raw Imported Events, Normalized Ledger, Network Summaries, CVI Baseline', 'Internal — source data only'],
+    ['🔵 Blue',       'Config / Ops','Config, Network Mapping, Recipients, Project Accounts, Unmapped, Backfill Control, UI Control', 'Internal — configuration'],
+    ['🔴 Red',        'System',      'Run Log',                                                       'Internal — execution history'],
+    ['🩶 Light Grey', 'Reference',   'README, Instructions, Architecture Map, Data Contract',         'Internal — documentation']
+  ];
+  clearAndWriteTable_(SHEETS.TAB_LEGEND, ['Color', 'Group', 'Tabs', 'Notes'], rows);
+}
+
+function organizeSheetTabs() {
+  const ss = SpreadsheetApp.getActive();
+
+  // Tab order: left to right by audience/purpose
+  const TAB_ORDER = [
+    // Leadership (green)
+    SHEETS.EXECUTIVE_SNAPSHOT,
+    SHEETS.PRESENTATION_VIEW,
+    // Grading (purple)
+    SHEETS.REP_GRADING,
+    SHEETS.ADVERTISER_GRADING,
+    SHEETS.NETWORK_GRADING,
+    SHEETS.REP_GRADING_DIAGNOSTIC,
+    SHEETS.GRADING_METHODOLOGY,
+    // Summaries (orange)
+    SHEETS.SUMMARY_BY_SYSTEM,
+    SHEETS.SUMMARY_BY_NETWORK,
+    SHEETS.SUMMARY_BY_ISSUE_TYPE,
+    // Trends (teal)
+    SHEETS.TREND_WEEKLY,
+    SHEETS.TREND_MONTHLY,
+    // Raw / operational data (grey)
+    SHEETS.RAW_IMPORTED_EVENTS,
+    SHEETS.NORMALIZED_LEDGER,
+    SHEETS.IMPORTED_NETWORK_SUMMARIES,
+    SHEETS.CVI_DAILY_BASELINE,
+    // Config / ops (blue)
+    SHEETS.CONFIG,
+    SHEETS.NETWORK_MAPPING,
+    SHEETS.WEEKLY_RECIPIENTS,
+    SHEETS.PROJECT_ACCOUNTS,
+    SHEETS.UNMAPPED_NETWORKS,
+    SHEETS.BACKFILL_CONTROL,
+    SHEETS.UI_CONTROL,
+    // System (red)
+    SHEETS.RUN_LOG,
+    // Reference docs (light grey)
+    SHEETS.TAB_LEGEND,
+    SHEETS.README,
+    SHEETS.INSTRUCTIONS,
+    SHEETS.ARCHITECTURE_MAP,
+    SHEETS.DATA_CONTRACT
+  ];
+
+  const TAB_COLORS = {
+    [SHEETS.EXECUTIVE_SNAPSHOT]:        '#34A853',  // green – leadership
+    [SHEETS.PRESENTATION_VIEW]:         '#34A853',
+    [SHEETS.REP_GRADING]:               '#7B68EE',  // purple – grading
+    [SHEETS.ADVERTISER_GRADING]:        '#7B68EE',
+    [SHEETS.NETWORK_GRADING]:           '#7B68EE',
+    [SHEETS.REP_GRADING_DIAGNOSTIC]:    '#9E7FD4',  // lighter purple – grading support
+    [SHEETS.GRADING_METHODOLOGY]:       '#9E7FD4',
+    [SHEETS.SUMMARY_BY_SYSTEM]:         '#E69138',  // orange – summaries
+    [SHEETS.SUMMARY_BY_NETWORK]:        '#E69138',
+    [SHEETS.SUMMARY_BY_ISSUE_TYPE]:     '#E69138',
+    [SHEETS.TREND_WEEKLY]:              '#2BBCB4',  // teal – trends
+    [SHEETS.TREND_MONTHLY]:             '#2BBCB4',
+    [SHEETS.RAW_IMPORTED_EVENTS]:       '#9E9E9E',  // grey – raw data
+    [SHEETS.NORMALIZED_LEDGER]:         '#9E9E9E',
+    [SHEETS.IMPORTED_NETWORK_SUMMARIES]:'#9E9E9E',
+    [SHEETS.CVI_DAILY_BASELINE]:        '#9E9E9E',
+    [SHEETS.CONFIG]:                    '#4A90D9',  // blue – config/ops
+    [SHEETS.NETWORK_MAPPING]:           '#4A90D9',
+    [SHEETS.WEEKLY_RECIPIENTS]:         '#4A90D9',
+    [SHEETS.PROJECT_ACCOUNTS]:          '#4A90D9',
+    [SHEETS.UNMAPPED_NETWORKS]:         '#4A90D9',
+    [SHEETS.BACKFILL_CONTROL]:          '#4A90D9',
+    [SHEETS.UI_CONTROL]:                '#4A90D9',
+    [SHEETS.RUN_LOG]:                   '#E53935',  // red – system log
+    [SHEETS.TAB_LEGEND]:               '#B0BEC5',  // light grey – reference
+    [SHEETS.README]:                    '#B0BEC5',
+    [SHEETS.INSTRUCTIONS]:              '#B0BEC5',
+    [SHEETS.ARCHITECTURE_MAP]:          '#B0BEC5',
+    [SHEETS.DATA_CONTRACT]:             '#B0BEC5'
+  };
+
+  // Move sheets into position (right-to-left so each insert at pos 0 produces correct order)
+  TAB_ORDER.slice().reverse().forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    ss.moveActiveSheet && ss.setActiveSheet(sheet);
+    ss.moveActiveSheet(1);
+  });
+
+  // Apply colors
+  Object.keys(TAB_COLORS).forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet) sheet.setTabColor(TAB_COLORS[name]);
+  });
+
+  SpreadsheetApp.getUi().alert('Tab order and colors updated.');
 }
 
 function seedBackfillControlSheet_() {

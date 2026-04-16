@@ -1,0 +1,145 @@
+﻿Workbook: Adops Intelligence Hub (10).xlsx
+
+================================================================================
+WORKBOOK INVENTORY
+================================================================================
+Instructions: rows=7, cols=2
+Presentation_View: rows=7, cols=1
+Executive_Snapshot: rows=18, cols=4
+Run_Log: rows=1198, cols=5
+Data_Contract: rows=15, cols=5
+Config: rows=9, cols=3
+README: rows=5, cols=2
+Architecture_Map: rows=10, cols=4
+Weekly_Recipients: rows=0, cols=1
+Project_Accounts: rows=7, cols=7
+Network_Mapping: rows=171, cols=19
+Unmapped_Networks: rows=1, cols=5
+CVI_Daily_Baseline: rows=0, cols=15
+Raw_Imported_Events: rows=3248, cols=29
+Normalized_Event_Ledger: rows=3160, cols=25
+Imported_Network_Summaries: rows=0, cols=6
+Summary_By_System: rows=2, cols=2
+Network_Grading: rows=109, cols=63
+Rep_Grading: rows=150, cols=1
+Summary_By_Network: rows=54, cols=2
+Summary_By_Issue_Type: rows=30, cols=2
+Trend_Weekly: rows=2, cols=3
+Trend_Monthly: rows=2, cols=3
+Backfill_Control: rows=1, cols=7
+UI_Control: rows=0, cols=0
+
+================================================================================
+Raw_Imported_Events
+================================================================================
+Rows: 3248
+Missing headers: None
+
+[CM360 Audit System] rows=227
+  missing Account REP OPS: 1 (0.4%)
+
+[End-of-Month Tracker] rows=3021
+
+Unique placement IDs: 2980
+
+================================================================================
+Normalized_Event_Ledger
+================================================================================
+Rows: 3160
+Missing headers: None
+
+[CM360 Audit System] rows=227
+  missing Account REP OPS: 1 (0.4%)
+
+[End-of-Month Tracker] rows=2933
+
+================================================================================
+CVI_Daily_Baseline
+================================================================================
+Rows: 0
+Missing headers: None
+Snapshot dates: None
+
+================================================================================
+Rep_Grading
+================================================================================
+Rows: 150
+Rep entries: 24
+Ratio lines: 24
+
+================================================================================
+Network_Grading
+================================================================================
+Rows: 109
+Network entries: 54
+
+================================================================================
+Executive_Snapshot
+================================================================================
+Rows: 18
+Headers: ['Section', 'Metric', 'Value', 'Status']
+First data row: ['Overview', None, None, None]
+
+================================================================================
+Presentation_View
+================================================================================
+Rows: 7
+Headers: ['ADOPS INTELLIGENCE HUB | LEADERSHIP SNAPSHOT']
+First data row: ['Latest Live Snapshot: N/A']
+
+================================================================================
+Summary_By_System
+================================================================================
+Rows: 2
+Headers: ['Source Project', 'Issue Count']
+First data row: ['End-of-Month Tracker', 2933.0]
+
+================================================================================
+Summary_By_Network
+================================================================================
+Rows: 54
+Headers: ['Network Name', 'Issue Count']
+First data row: ['Spectrum (residential/business filtered)', 722.0]
+
+================================================================================
+Summary_By_Issue_Type
+================================================================================
+Rows: 30
+Headers: ['Issue Flags', 'Issue Count']
+First data row: ['≡ƒƒª DELIVERY: Post-Flight Activity', 1596.0]
+
+================================================================================
+Trend_Weekly
+================================================================================
+Rows: 2
+Headers: ['Event Week', 'Source Project', 'Issue Count']
+First data row: ['2026-W15', 'CM360 Audit System', 227.0]
+
+================================================================================
+Trend_Monthly
+================================================================================
+Rows: 2
+Headers: ['Event Month', 'Source Project', 'Issue Count']
+First data row: [datetime.datetime(2026, 4, 1, 0, 0), 'CM360 Audit System', 227.0]
+
+================================================================================
+Unmapped_Networks
+================================================================================
+Rows: 1
+Headers: ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS', 'Event Count']
+First data row: [None, 'BLADE Urban Air Mobility Inc', None, None, 1.0]
+
+================================================================================
+Run_Log
+================================================================================
+Rows: 1198
+Headers: ['Timestamp', 'Action', 'Status', 'Message', 'Context']
+First data row: [datetime.datetime(2026, 3, 24, 16, 40, 47, 767000), 'setupProjectSheets', 'SUCCESS', 'Completed', '{"success":true}']
+
+================================================================================
+CROSS-CHECK COUNTS
+================================================================================
+Raw_Imported_Events rows: 3248
+Normalized_Event_Ledger rows: 3160
+CVI_Daily_Baseline rows: 0
+Raw minus Normalized: 88

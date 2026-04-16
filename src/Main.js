@@ -1,5 +1,12 @@
 function refreshSourceExports() {
-  return importFromConfiguredSources_();
+  return withRunLogging_('refreshSourceExports', function () {
+    const result = {};
+    result.imported = importFromConfiguredSources_();
+    // CVI Baseline refresh is intentionally separate — it takes ~4 minutes and
+    // would exceed the 6-minute Apps Script limit when combined with imports.
+    // Use "Refresh CVI Baseline (Data Tab)" from the menu to update it independently.
+    return result;
+  });
 }
 
 function refreshCviBaselineReference() {
@@ -18,29 +25,47 @@ function buildRepGrading() {
   });
 }
 
+function buildAdvertiserGrading() {
+  return withRunLogging_('buildAdvertiserGrading', function () {
+    return buildAdvertiserGrading_();
+  });
+}
+
 function setupDailyTrigger() {
+  // Backward-compatible wrapper for existing menu/actions.
+  return configureAutomationTriggers();
+}
+
+function configureAutomationTriggers() {
   return withRunLogging_('setupDailyTrigger', function () {
-    // Remove existing triggers for runFullRefresh to avoid duplicates
+    // Remove existing automation triggers to avoid duplicates.
     const triggers = ScriptApp.getProjectTriggers();
     triggers.forEach(function (trigger) {
-      if (trigger.getHandlerFunction() === 'runFullRefresh') {
+      const handler = trigger.getHandlerFunction();
+      if (handler === 'runFullRefresh' || handler === 'runFullRefreshContinuation') {
         ScriptApp.deleteTrigger(trigger);
       }
     });
 
-    // Create new daily trigger at 6 AM
+    // Create one daily kickoff trigger. runFullRefresh queues continuation automatically.
     ScriptApp.newTrigger('runFullRefresh')
       .timeBased()
       .atHour(6)
       .everyDays(1)
       .create();
 
-    logRun_('setupDailyTrigger', RUN_STATUS.SUCCESS, 'Daily trigger created for 6 AM', {
+    logRun_('setupDailyTrigger', RUN_STATUS.SUCCESS, 'Automation trigger configured for 6 AM kickoff', {
       function: 'runFullRefresh',
-      schedule: 'Daily at 6:00 AM'
+      schedule: 'Daily at 6:00 AM',
+      continuation: 'runFullRefreshContinuation is queued automatically by runFullRefresh'
     });
 
-    return { success: true, schedule: 'Daily at 6:00 AM', function: 'runFullRefresh' };
+    return {
+      success: true,
+      schedule: 'Daily at 6:00 AM',
+      kickoffFunction: 'runFullRefresh',
+      continuationFunction: 'runFullRefreshContinuation (auto-queued)'
+    };
   });
 }
 
@@ -49,7 +74,8 @@ function removeDailyTrigger() {
     const triggers = ScriptApp.getProjectTriggers();
     let removed = 0;
     triggers.forEach(function (trigger) {
-      if (trigger.getHandlerFunction() === 'runFullRefresh') {
+      const handler = trigger.getHandlerFunction();
+      if (handler === 'runFullRefresh' || handler === 'runFullRefreshContinuation') {
         ScriptApp.deleteTrigger(trigger);
         removed++;
       }
@@ -64,6 +90,7 @@ function removeDailyTrigger() {
 }
 function runAllSummaries(skipCrossEnrich) {
   return withRunLogging_('runAllSummaries', function () {
+    const startedAtMs = Date.now();
     const result = {};
 
     result.normalizeRawEvents = runLoggedStep_('runAllSummaries', 'normalizeRawEvents_', function () {
@@ -80,18 +107,43 @@ function runAllSummaries(skipCrossEnrich) {
       result.crossEnrichLedger = { skipped: true, reason: 'Fast mode - cross-enrichment disabled' };
     }
     
-    result.buildSummaries = runLoggedStep_('runAllSummaries', 'buildSummaries_', function () {
-      return buildSummaries_();
-    });
+    if (skipCrossEnrich) {
+      result.buildSummaries = runLoggedStep_('runAllSummaries', 'buildSummariesCore_', function () {
+        return buildSummariesCore_();
+      });
+    } else {
+      result.buildSummaries = runLoggedStep_('runAllSummaries', 'buildSummaries_', function () {
+        return buildSummaries_();
+      });
+    }
     result.buildTrends = runLoggedStep_('runAllSummaries', 'buildTrends_', function () {
       return buildTrends_();
     });
     result.buildNetworkGrading = runLoggedStep_('runAllSummaries', 'buildNetworkGrading_', function () {
       return buildNetworkGrading_();
     });
-    result.buildRepGrading = runLoggedStep_('runAllSummaries', 'buildRepGrading_', function () {
-      return buildRepGrading_();
-    });
+
+    if (skipCrossEnrich) {
+      // Fast mode: always defer heavy grading to avoid timeouts and lock contention.
+      result.buildRepGrading = { skipped: true, reason: 'Deferred to continuation in fast mode' };
+      result.buildAdvertiserGrading = { skipped: true, reason: 'Deferred to continuation in fast mode' };
+      result.executiveArtifactsContinuation = runLoggedStep_('runAllSummaries', 'queueExecutiveArtifactsContinuation_', function () {
+        return queueExecutiveArtifactsContinuation_();
+      });
+    } else if (shouldDeferHeavyGrading_(startedAtMs)) {
+      result.buildRepGrading = { skipped: true, reason: 'Deferred to continuation to avoid timeout' };
+      result.buildAdvertiserGrading = { skipped: true, reason: 'Deferred to continuation to avoid timeout' };
+      result.gradingContinuation = runLoggedStep_('runAllSummaries', 'queueDeferredGradingContinuation_', function () {
+        return queueDeferredGradingContinuation_();
+      });
+    } else {
+      result.buildRepGrading = runLoggedStep_('runAllSummaries', 'buildRepGrading_', function () {
+        return buildRepGrading_();
+      });
+      result.buildAdvertiserGrading = runLoggedStep_('runAllSummaries', 'buildAdvertiserGrading_', function () {
+        return buildAdvertiserGrading_();
+      });
+    }
 
     // Generate unmapped networks summary last (non-critical, skip if time runs out)
     try {
@@ -106,6 +158,173 @@ function runAllSummaries(skipCrossEnrich) {
   });
 }
 
+function runDeferredGradingContinuation() {
+  return withRunLogging_('runDeferredGradingContinuation', function () {
+    const result = {};
+
+    result.buildRepGrading = runLoggedStep_('runDeferredGradingContinuation', 'buildRepGrading_', function () {
+      return buildRepGrading_();
+    });
+
+    result.advertiserGradingContinuation = runLoggedStep_('runDeferredGradingContinuation', 'queueDeferredAdvertiserGradingContinuation_', function () {
+      return queueDeferredAdvertiserGradingContinuation_();
+    });
+
+    return result;
+  });
+}
+
+function runDeferredAdvertiserGradingContinuation() {
+  return withRunLogging_('runDeferredAdvertiserGradingContinuation', function () {
+    const result = {};
+
+    result.buildAdvertiserGrading = runLoggedStep_('runDeferredAdvertiserGradingContinuation', 'buildAdvertiserGrading_', function () {
+      return buildAdvertiserGrading_();
+    });
+
+    return result;
+  });
+}
+
+function runExecutiveArtifactsContinuation() {
+  return withRunLogging_('runExecutiveArtifactsContinuation', function () {
+    const result = {};
+
+    result.buildExecutiveSnapshot = runLoggedStep_('runExecutiveArtifactsContinuation', 'buildExecutiveSnapshotOnly_', function () {
+      return buildExecutiveSnapshotOnly_();
+    });
+
+    result.presentationContinuation = runLoggedStep_('runExecutiveArtifactsContinuation', 'queuePresentationViewContinuation_', function () {
+      return queuePresentationViewContinuation_();
+    });
+
+    return result;
+  });
+}
+
+function runPresentationViewContinuation() {
+  return withRunLogging_('runPresentationViewContinuation', function () {
+    const result = {};
+
+    result.buildPresentationView = runLoggedStep_('runPresentationViewContinuation', 'buildPresentationViewOnly_', function () {
+      return buildPresentationViewOnly_();
+    });
+
+    result.gradingContinuation = runLoggedStep_('runPresentationViewContinuation', 'queueDeferredGradingContinuation_', function () {
+      return queueDeferredGradingContinuation_();
+    });
+
+    return result;
+  });
+}
+
+function queueDeferredGradingContinuation_() {
+  const handlerName = 'runDeferredGradingContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 90 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
+}
+
+function queueDeferredAdvertiserGradingContinuation_() {
+  const handlerName = 'runDeferredAdvertiserGradingContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 90 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
+}
+
+function queueExecutiveArtifactsContinuation_() {
+  const handlerName = 'runExecutiveArtifactsContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 90 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
+}
+
+function queuePresentationViewContinuation_() {
+  const handlerName = 'runPresentationViewContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 90 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
+}
+
+function shouldDeferHeavyGrading_(startedAtMs) {
+  // Apps Script hard limit is ~6 minutes. Defer heavy grading if run has
+  // already used most of the budget.
+  const elapsedMs = Date.now() - startedAtMs;
+  return elapsedMs >= 240000;
+}
+
 function runAllSummariesFast() {
   return runAllSummaries(true);
 }
@@ -118,19 +337,62 @@ function runFullRefresh() {
       return refreshSourceExports();
     });
 
-    result.runAllSummaries = runLoggedStep_('runFullRefresh', '2. Run All Summaries (includes grading)', function () {
-      return runAllSummaries();
+    result.continuation = runLoggedStep_('runFullRefresh', '2. Queue Summaries Continuation', function () {
+      return queueRunFullRefreshContinuation_();
     });
 
-    logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Full refresh completed successfully (CVI Baseline skipped - run separately if needed)', {
+    logRun_('runFullRefresh', RUN_STATUS.SUCCESS, '✅ Source refresh completed. Summaries queued in continuation trigger.', {
       totalSteps: 2,
       sourceExportResult: result.refreshSourceExports,
-      summariesResult: result.runAllSummaries,
-      note: 'CVI Baseline refresh takes 2-3 minutes and is skipped to avoid timeout. Run separately if needed. Network grading and rep grading are included in summaries step.'
+      continuation: result.continuation,
+      note: 'Imports can consume most of the 6-minute Apps Script limit. Summaries are run in a separate one-time continuation trigger to avoid timeout. CVI Baseline remains a separate manual refresh.'
     });
 
     return result;
   });
+}
+
+function runFullRefreshContinuation() {
+  return withRunLogging_('runFullRefreshContinuation', function () {
+    const result = {};
+
+    result.runAllSummaries = runLoggedStep_('runFullRefreshContinuation', 'Run All Summaries Fast (timeout-safe)', function () {
+      return runAllSummariesFast();
+    });
+
+    logRun_('runFullRefreshContinuation', RUN_STATUS.SUCCESS, '✅ Continuation summaries completed successfully.', {
+      summariesResult: result.runAllSummaries,
+      note: 'This continuation is queued by runFullRefresh to stay under Apps Script execution limits. Fast mode is used for time-driven reliability.'
+    });
+
+    return result;
+  });
+}
+
+function queueRunFullRefreshContinuation_() {
+  const handlerName = 'runFullRefreshContinuation';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  // Keep only one pending continuation trigger at a time.
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 60 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
 }
 
 function runProjectPipeline() {
@@ -140,6 +402,20 @@ function runProjectPipeline() {
     runAllSummaries();
     runWeeklySummaryEmail();
     return { success: true };
+  });
+}
+
+function setIssueTypeModeRaw() {
+  return withRunLogging_('setIssueTypeModeRaw', function () {
+    PropertiesService.getScriptProperties().setProperty('ISSUE_TYPE_MODE', 'RAW');
+    return { issueTypeMode: 'RAW' };
+  });
+}
+
+function setIssueTypeModeClean() {
+  return withRunLogging_('setIssueTypeModeClean', function () {
+    PropertiesService.getScriptProperties().setProperty('ISSUE_TYPE_MODE', 'CLEAN');
+    return { issueTypeMode: 'CLEAN' };
   });
 }
 
