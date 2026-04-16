@@ -342,9 +342,29 @@ function runBaselineAndFullRefresh() {
   return withRunLogging_('runBaselineAndFullRefresh', function () {
     const result = {};
 
-    result.chunkedBaselineKickoff = runLoggedStep_('runBaselineAndFullRefresh', '1. Start Chunked CVI Baseline Pipeline', function () {
-      return startChunkedCviBaselineAndContinue_();
-    });
+    try {
+      result.chunkedBaselineKickoff = runLoggedStep_('runBaselineAndFullRefresh', '1. Start Chunked CVI Baseline Pipeline', function () {
+        return startChunkedCviBaselineAndContinue_();
+      });
+    } catch (err) {
+      if (!isRetryableSpreadsheetError_(err)) {
+        throw err;
+      }
+
+      result.retryKickoffContinuation = queueBaselineKickoffRetryContinuation_();
+      logRun_('runBaselineAndFullRefresh', RUN_STATUS.WARNING,
+        'Retryable Spreadsheet timeout during baseline kickoff. Re-queued kickoff continuation.', {
+          error: String(err),
+          continuation: result.retryKickoffContinuation
+        }
+      );
+
+      return {
+        requeuedAfterRetryableError: true,
+        error: String(err),
+        continuation: result.retryKickoffContinuation
+      };
+    }
 
     logRun_('runBaselineAndFullRefresh', RUN_STATUS.SUCCESS,
       '✅ Chunked baseline kickoff complete. Continuations will process baseline chunks, then source exports, then summaries/grading.',
@@ -356,6 +376,31 @@ function runBaselineAndFullRefresh() {
 
     return result;
   });
+}
+
+function queueBaselineKickoffRetryContinuation_() {
+  const handlerName = 'runBaselineAndFullRefresh';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const delayMs = 90 * 1000;
+  const runAt = new Date(Date.now() + delayMs);
+
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: delayMs
+  };
 }
 
 function runBaselineRefreshContinuation() {
