@@ -6,6 +6,7 @@ function onOpen() {
 
   SpreadsheetApp.getUi()
     .createMenu('AdOps Intelligence Hub')
+    .addItem('✅ Refresh Baseline + Full Refresh (One Button)', 'runBaselineAndFullRefresh')
     .addItem('🚀 Run Full Refresh (One-Go, Auto-Continues)', 'runFullRefresh')
     .addSeparator()
     .addItem('Refresh Source Exports', 'refreshSourceExports')

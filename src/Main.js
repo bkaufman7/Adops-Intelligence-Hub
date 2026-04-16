@@ -329,6 +329,45 @@ function runAllSummariesFast() {
   return runAllSummaries(true);
 }
 
+/**
+ * One-button full pipeline:
+ * 1. CVI Baseline refresh (inline, ~3-4 min)
+ * 2. Source exports refresh (inline)
+ * 3. Queue summaries + grading continuation chain
+ *
+ * After pressing this, the continuation chain runs automatically in the
+ * background via time-based triggers. Full cycle takes ~10-15 min total.
+ */
+function runBaselineAndFullRefresh() {
+  return withRunLogging_('runBaselineAndFullRefresh', function () {
+    const result = {};
+
+    result.refreshCviBaseline = runLoggedStep_('runBaselineAndFullRefresh', '1. Refresh CVI Baseline', function () {
+      return refreshCviBaselineReference_();
+    });
+
+    result.refreshSourceExports = runLoggedStep_('runBaselineAndFullRefresh', '2. Refresh Source Exports', function () {
+      return refreshSourceExports();
+    });
+
+    result.continuation = runLoggedStep_('runBaselineAndFullRefresh', '3. Queue Summaries + Grading Continuation', function () {
+      return queueRunFullRefreshContinuation_();
+    });
+
+    logRun_('runBaselineAndFullRefresh', RUN_STATUS.SUCCESS,
+      '✅ Baseline + source refresh done. Summaries/grading queued via continuation chain.',
+      {
+        steps: 3,
+        baselineResult: result.refreshCviBaseline,
+        sourceResult: result.refreshSourceExports,
+        nextStep: 'runFullRefreshContinuation triggers in ~60s, then executive/grading continuations follow automatically'
+      }
+    );
+
+    return result;
+  });
+}
+
 function runFullRefresh() {
   return withRunLogging_('runFullRefresh', function () {
     const result = {};
