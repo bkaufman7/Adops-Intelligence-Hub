@@ -332,7 +332,7 @@ function runAllSummariesFast() {
 /**
  * One-button full pipeline (continuation-safe):
  *
- * Stage 1 (this function): CVI Baseline only (~3-4 min), then queues Stage 2.
+ * Stage 1 (this function): Kick off chunked CVI baseline pipeline with checkpoints.
  * Stage 2 (runBaselineRefreshContinuation): Source exports, then queues summaries/grading chain.
  * Remaining stages: existing runFullRefreshContinuation → executive → presentation → grading chain.
  *
@@ -342,19 +342,15 @@ function runBaselineAndFullRefresh() {
   return withRunLogging_('runBaselineAndFullRefresh', function () {
     const result = {};
 
-    result.refreshCviBaseline = runLoggedStep_('runBaselineAndFullRefresh', '1. Refresh CVI Baseline', function () {
-      return refreshCviBaselineReference_();
-    });
-
-    result.continuation = runLoggedStep_('runBaselineAndFullRefresh', '2. Queue Source Exports Continuation', function () {
-      return queueBaselineRefreshContinuation_();
+    result.chunkedBaselineKickoff = runLoggedStep_('runBaselineAndFullRefresh', '1. Start Chunked CVI Baseline Pipeline', function () {
+      return startChunkedCviBaselineAndContinue_();
     });
 
     logRun_('runBaselineAndFullRefresh', RUN_STATUS.SUCCESS,
-      '✅ CVI Baseline done. Source exports + summaries/grading queued via continuation chain.',
+      '✅ Chunked baseline kickoff complete. Continuations will process baseline chunks, then source exports, then summaries/grading.',
       {
-        baselineResult: result.refreshCviBaseline,
-        nextStep: 'runBaselineRefreshContinuation triggers in ~60s'
+        baselineKickoff: result.chunkedBaselineKickoff,
+        nextStep: 'runChunkedCviBaselineContinuation triggers in ~45s and self-continues until finalize'
       }
     );
 
