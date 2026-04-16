@@ -72,12 +72,23 @@ function buildRepGrading_() {
     ? (overallFlaggedLivePlacements / overallLivePlacements) * 100
     : model.defaultBaselinePct;
 
-  Object.keys(repStats).forEach(function (repName) {
-    const stats = repStats[repName];
+  // Include all reps from current live baseline snapshot so leadership can
+  // see full trafficked coverage even when a rep has zero current issues.
+  const allRepNames = {};
+  Object.keys(repStats).forEach(function (repName) { allRepNames[repName] = true; });
+  Object.keys(liveCoverage.byRep || {}).forEach(function (repName) { allRepNames[repName] = true; });
+
+  Object.keys(allRepNames).forEach(function (repName) {
+    const stats = repStats[repName] || {
+      flaggedPlacements: {},
+      uniqueIssueKeys: {},
+      last30DaysEvents: 0
+    };
     const liveInfo = liveCoverage.byRep[repName] || { livePlacements: {} };
 
     const flaggedPlacements = countKeys_(stats.flaggedPlacements);
     const totalLivePlacements = countKeys_(liveInfo.livePlacements);
+    const totalTraffickedPlacements = totalLivePlacements;
     const flaggedLivePlacements = intersectCountMaps_(stats.flaggedPlacements, liveInfo.livePlacements);
     const rawFlaggedPct = totalLivePlacements > 0 ? (flaggedLivePlacements / totalLivePlacements) * 100 : null;
     const adjustedFlaggedPct = calculateSmoothedPct_(flaggedLivePlacements, totalLivePlacements, baselinePct, model.repSmoothingK);
@@ -99,7 +110,7 @@ function buildRepGrading_() {
       eligibility: eligibility,
       grade: performanceGrade,
       confidence: confidence,
-      last30DaysEvents: stats.last30DaysEvents,
+      totalTraffickedPlacements: totalTraffickedPlacements,
       issueDensity: issueDensity
     });
 
@@ -268,11 +279,9 @@ function repPerformanceHeaders_() {
     'Adjusted Flagged %',
     'Raw Flagged %',
     'Flagged Live Placements',
-    'Total Live Placements',
+    'Total Trafficked Placements (Snapshot)',
     'Flagged/Live Ratio',
-    'Confidence',
-    '30d Issue Events',
-    'Diagnostic Issues/Flagged Placement'
+    'Confidence'
   ];
 }
 
@@ -314,16 +323,14 @@ function writeRepPerformanceTable_(rows) {
       formatPercentValue_(item.adjustedFlaggedPct),
       formatPercentValue_(item.rawFlaggedPct),
       item.flaggedLivePlacements,
-      item.totalLivePlacements,
-      formatPlacementRatio_(item.flaggedLivePlacements, item.totalLivePlacements),
-      item.confidence,
-      item.last30DaysEvents,
-      item.issueDensity.toFixed(2)
+      item.totalTraffickedPlacements,
+      formatPlacementRatio_(item.flaggedLivePlacements, item.totalTraffickedPlacements),
+      item.confidence
     ];
   });
 
   clearAndWriteTable_(SHEETS.REP_GRADING, headers, tableRows);
-  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 12, 5, 10, tableRows);
+  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 10, 5, 10, tableRows);
 }
 
 function writeRepDiagnosticTable_(rows) {
@@ -481,11 +488,9 @@ function getHeaderNotesBySheet_(sheetName) {
       'Adjusted Flagged %': 'Smoothed flagged-live rate used for grading to reduce small-sample volatility.',
       'Raw Flagged %': 'Exact flagged-live rate before smoothing: flagged live placements / total live placements.',
       'Flagged Live Placements': 'Count of unique flagged placements that are also present in latest live snapshot.',
-      'Total Live Placements': 'Count of unique live placements for the rep in the latest snapshot.',
-      'Flagged/Live Ratio': 'Readable ratio form of flagged live placements versus total live placements.',
-      'Confidence': 'Signal quality label derived from denominator size and observed flagged volume.',
-      '30d Issue Events': 'Issue-event volume recorded in the last 30 days (event-level, not unique placements).',
-      'Diagnostic Issues/Flagged Placement': 'Secondary diagnostic density: unique issue fingerprints divided by flagged placements.'
+      'Total Trafficked Placements (Snapshot)': 'Distinct placement IDs trafficked for the rep in the latest CVI baseline snapshot (mapped via Network ID or Advertiser).',
+      'Flagged/Live Ratio': 'Readable ratio form of flagged live placements versus total trafficked placements.',
+      'Confidence': 'Signal quality label derived from denominator size and observed flagged volume.'
     };
   }
 
@@ -536,11 +541,9 @@ function getLegendRowsBySheet_(sheetName) {
       ['Adjusted Flagged %', 'Smoothed flagged-live percent used for grading decisions.'],
       ['Raw Flagged %', 'Unsmoothed flagged-live percent for transparency.'],
       ['Flagged Live Placements', 'Flagged placements that are also in the latest live baseline snapshot.'],
-      ['Total Live Placements', 'Latest baseline denominator for the rep.'],
-      ['Flagged/Live Ratio', 'Same signal as percentages, shown as count ratio.'],
-      ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.'],
-      ['30d Issue Events', 'Recent event activity in rolling last 30 days.'],
-      ['Diagnostic Issues/Flagged Placement', 'Secondary issue-density metric (diagnostic only).']
+      ['Total Trafficked Placements (Snapshot)', 'All distinct placement IDs for the rep in the current CVI baseline snapshot, including those with zero issues.'],
+      ['Flagged/Live Ratio', 'Flagged live placements divided by total trafficked placements.'],
+      ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.']
     ];
   }
 
