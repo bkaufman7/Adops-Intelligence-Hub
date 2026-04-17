@@ -311,6 +311,7 @@ function repPerformanceHeaders_() {
     'Raw Flagged %',
     'Flagged Live Placements',
     'Total Trafficked Placements (Snapshot)',
+    'Unflagged Live Placements',
     'Flagged/Live Ratio',
     'Confidence'
   ];
@@ -346,6 +347,7 @@ function advertiserPerformanceHeaders_() {
 function writeRepPerformanceTable_(rows) {
   const headers = repPerformanceHeaders_();
   const tableRows = rows.map(function (item, index) {
+    const unflaggedLivePlacements = Math.max(0, Number(item.totalTraffickedPlacements || 0) - Number(item.flaggedLivePlacements || 0));
     return [
       index + 1,
       item.repName,
@@ -355,13 +357,14 @@ function writeRepPerformanceTable_(rows) {
       formatPercentValue_(item.rawFlaggedPct),
       item.flaggedLivePlacements,
       item.totalTraffickedPlacements,
+      unflaggedLivePlacements,
       formatPlacementRatio_(item.flaggedLivePlacements, item.totalTraffickedPlacements),
       item.confidence
     ];
   });
 
   clearAndWriteTable_(SHEETS.REP_GRADING, headers, tableRows);
-  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 10, 5, 10, tableRows);
+  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 11, 5, 11, tableRows);
 }
 
 function writeRepDiagnosticTable_(rows) {
@@ -520,6 +523,7 @@ function getHeaderNotesBySheet_(sheetName) {
       'Raw Flagged %': 'Exact flagged-live rate before smoothing: flagged live placements / total live placements.',
       'Flagged Live Placements': 'Count of unique flagged placements that are also present in latest live snapshot.',
       'Total Trafficked Placements (Snapshot)': 'Distinct placement IDs trafficked for the rep in the latest CVI baseline snapshot (mapped via Network ID or Advertiser).',
+      'Unflagged Live Placements': 'Distinct trafficked placement IDs in the latest snapshot that are not flagged for the rep (Total Trafficked - Flagged Live).',
       'Flagged/Live Ratio': 'Readable ratio form of flagged live placements versus total trafficked placements.',
       'Confidence': 'Signal quality label derived from denominator size and observed flagged volume.'
     };
@@ -573,6 +577,7 @@ function getLegendRowsBySheet_(sheetName) {
       ['Raw Flagged %', 'Unsmoothed flagged-live percent for transparency.'],
       ['Flagged Live Placements', 'Flagged placements that are also in the latest live baseline snapshot.'],
       ['Total Trafficked Placements (Snapshot)', 'All distinct placement IDs for the rep in the current CVI baseline snapshot, including those with zero issues.'],
+      ['Unflagged Live Placements', 'Live placements currently trafficked for the rep that have no flagged issue in the current grading window.'],
       ['Flagged/Live Ratio', 'Flagged live placements divided by total trafficked placements.'],
       ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.']
     ];
