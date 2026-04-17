@@ -2,7 +2,7 @@ function refreshCviBaselineReference_() {
   return withRunLogging_('refreshCviBaselineReference_', function () {
     const sourceCfg = getCviSourceConfig_();
     const dataTabName = getConfigValue_(CONFIG_KEYS.CVI_BASELINE_TAB, 'Data');
-    const retentionDays = parseInt(getConfigValue_(CONFIG_KEYS.CVI_BASELINE_RETENTION_DAYS, '7'), 10) || 7;
+    const retentionDays = getCviBaselineRetentionDays_();
 
     const sourceSs = SpreadsheetApp.openById(sourceCfg.spreadsheetId);
     const tab = sourceSs.getSheetByName(dataTabName);
@@ -152,7 +152,7 @@ function startChunkedCviBaselineAndContinue_() {
   const action = 'startChunkedCviBaselineAndContinue_';
   const sourceCfg = getCviSourceConfig_();
   const dataTabName = getConfigValue_(CONFIG_KEYS.CVI_BASELINE_TAB, 'Data');
-  const retentionDays = parseInt(getConfigValue_(CONFIG_KEYS.CVI_BASELINE_RETENTION_DAYS, '7'), 10) || 7;
+  const retentionDays = getCviBaselineRetentionDays_();
   const sourceSs = withSpreadsheetRetry_('chunked baseline kickoff open source spreadsheet', function () {
     return SpreadsheetApp.openById(sourceCfg.spreadsheetId);
   });
@@ -205,7 +205,7 @@ function startChunkedCviBaselineAndContinue_() {
   clearChunkedCviContinuationTrigger_('runChunkedCviBaselineContinuation');
   clearChunkedCviContinuationTrigger_('runChunkedCviBaselineFinalize');
 
-  ensureChunkedCviStagingSheet_(state.stagingSheetName);
+  resetChunkedCviScratchWorkspace_(state.stagingSheetName, 'CVI_Baseline_Next');
 
   saveChunkedCviBaselineState_(state);
   const continuation = queueChunkedCviContinuation_('runChunkedCviBaselineContinuation', 45 * 1000);
@@ -420,6 +420,10 @@ function runChunkedCviBaselineFinalize() {
         return processChunkedFinalizeStagedChunk_(state);
       }
 
+      if (state.finalizePhase === 'REPLACE_BASELINE') {
+        return processChunkedFinalizeDirectReplaceChunk_(state);
+      }
+
       if (state.finalizePhase === 'SWAP_AND_FINISH') {
         return finishChunkedFinalizeAndQueuePipeline_(state);
       }
@@ -453,19 +457,58 @@ function initializeChunkedFinalizeState_(state) {
   const baselineOutputSheetName = 'CVI_Baseline_Next';
   const cutoffDate = getDateOffsetString_(state.snapshotDate, -(Math.max(1, state.retentionDays) - 1));
 
+  const stagingLastRow = withSpreadsheetRetry_('chunked finalize read staging lastRow', function () {
+    return getOrCreateSheet_(state.stagingSheetName).getLastRow();
+  });
+
+  if (state.retentionDays <= 1) {
+    withSpreadsheetRetry_('chunked finalize reset baseline for direct replace', function () {
+      const baselineSheet = getOrCreateSheet_(baselineSourceSheetName);
+      baselineSheet.clearContents();
+      baselineSheet.getRange(1, 1, 1, CVI_BASELINE_COLUMNS.length).setValues([CVI_BASELINE_COLUMNS]);
+      trimSheetToSize_(baselineSheet, 2, CVI_BASELINE_COLUMNS.length);
+      return true;
+    });
+
+    state.finalizePhase = 'REPLACE_BASELINE';
+    state.finalizeChunkSize = 3000;
+    state.finalizeCutoffDate = cutoffDate;
+    state.finalizeBaselineSourceSheetName = baselineSourceSheetName;
+    state.finalizeStagingCursorRow = 2;
+    state.finalizeStagingLastRow = stagingLastRow;
+    state.finalizeRetainedRows = 0;
+    state.finalizeStagedRowsAppended = 0;
+    state.finalizeOutputRows = 0;
+    state.finalizeStartedAt = new Date().toISOString();
+    saveChunkedCviBaselineState_(state);
+
+    const replaceContinuation = queueChunkedCviContinuation_('runChunkedCviBaselineFinalize', 45 * 1000);
+    logRun_('runChunkedCviBaselineFinalize', RUN_STATUS.RUNNING, 'Initialized direct baseline replace finalize state', {
+      jobId: state.jobId,
+      snapshotDate: state.snapshotDate,
+      retentionDays: state.retentionDays,
+      stagingLastRow: state.finalizeStagingLastRow,
+      finalizeChunkSize: state.finalizeChunkSize,
+      continuation: replaceContinuation
+    });
+
+    return {
+      jobId: state.jobId,
+      finalizePhase: state.finalizePhase,
+      continuation: replaceContinuation
+    };
+  }
+
   withSpreadsheetRetry_('chunked finalize initialize output sheet', function () {
     const outputSheet = getOrCreateSheet_(baselineOutputSheetName);
     outputSheet.clearContents();
     outputSheet.getRange(1, 1, 1, CVI_BASELINE_COLUMNS.length).setValues([CVI_BASELINE_COLUMNS]);
+    trimSheetToSize_(outputSheet, 2, CVI_BASELINE_COLUMNS.length);
     return true;
   });
 
   const baselineSourceLastRow = withSpreadsheetRetry_('chunked finalize read baseline source lastRow', function () {
     return getOrCreateSheet_(baselineSourceSheetName).getLastRow();
-  });
-
-  const stagingLastRow = withSpreadsheetRetry_('chunked finalize read staging lastRow', function () {
-    return getOrCreateSheet_(state.stagingSheetName).getLastRow();
   });
 
   state.finalizePhase = 'COPY_RETAINED';
@@ -657,6 +700,61 @@ function processChunkedFinalizeStagedChunk_(state) {
   };
 }
 
+function processChunkedFinalizeDirectReplaceChunk_(state) {
+  const stagingSheet = getOrCreateSheet_(state.stagingSheetName);
+  const baselineSheet = getOrCreateSheet_(SHEETS.CVI_DAILY_BASELINE);
+
+  if (state.finalizeStagingCursorRow > state.finalizeStagingLastRow) {
+    return finishChunkedFinalizeDirectReplaceAndQueuePipeline_(state);
+  }
+
+  const startRow = state.finalizeStagingCursorRow;
+  const endRow = Math.min(state.finalizeStagingLastRow, startRow + state.finalizeChunkSize - 1);
+  const rowCount = Math.max(0, endRow - startRow + 1);
+
+  const chunkValues = withSpreadsheetRetry_('chunked finalize direct replace read staged chunk', function () {
+    return stagingSheet.getRange(startRow, 1, rowCount, CVI_BASELINE_COLUMNS.length).getValues();
+  });
+
+  if (chunkValues.length) {
+    withSpreadsheetRetry_('chunked finalize direct replace append to baseline', function () {
+      const baselineStartRow = baselineSheet.getLastRow() + 1;
+      baselineSheet.getRange(baselineStartRow, 1, chunkValues.length, CVI_BASELINE_COLUMNS.length).setValues(chunkValues);
+      return true;
+    });
+  }
+
+  state.finalizeStagingCursorRow = endRow + 1;
+  state.finalizeStagedRowsAppended += chunkValues.length;
+  state.finalizeOutputRows += chunkValues.length;
+  state.lastUpdatedAt = new Date().toISOString();
+  saveChunkedCviBaselineState_(state);
+
+  const completionPct = state.finalizeStagingLastRow > 1
+    ? Math.min(100, Math.round(((state.finalizeStagingCursorRow - 2) / Math.max(1, state.finalizeStagingLastRow - 1)) * 10000) / 100)
+    : 100;
+
+  const continuation = queueChunkedCviContinuation_('runChunkedCviBaselineFinalize', 45 * 1000);
+  logRun_('runChunkedCviBaselineFinalize', RUN_STATUS.SUCCESS, 'Direct-replaced baseline chunk from staged snapshot', {
+    jobId: state.jobId,
+    phase: 'REPLACE_BASELINE',
+    stagingStartRow: startRow,
+    stagingEndRow: endRow,
+    chunkRowsAppended: chunkValues.length,
+    stagedRowsAppendedTotal: state.finalizeStagedRowsAppended,
+    baselineRowsTotal: state.finalizeOutputRows,
+    completionPct: completionPct,
+    continuation: continuation
+  });
+
+  return {
+    jobId: state.jobId,
+    finalizePhase: state.finalizePhase,
+    stagedRowsAppendedTotal: state.finalizeStagedRowsAppended,
+    continuation: continuation
+  };
+}
+
 function finishChunkedFinalizeAndQueuePipeline_(state) {
   const ss = SpreadsheetApp.getActive();
   const oldBaseline = getOrCreateSheet_(SHEETS.CVI_DAILY_BASELINE);
@@ -702,6 +800,40 @@ function finishChunkedFinalizeAndQueuePipeline_(state) {
     skippedRows: state.skippedRows,
     retainedRows: state.finalizeRetainedRows,
     stagedRowsAppended: state.finalizeStagedRowsAppended,
+    totalBaselineRows: state.finalizeOutputRows,
+    continuation: downstreamContinuation
+  };
+}
+
+function finishChunkedFinalizeDirectReplaceAndQueuePipeline_(state) {
+  withSpreadsheetRetry_('chunked finalize direct replace reset ingest staging sheet', function () {
+    const stagingSheet = getOrCreateSheet_(state.stagingSheetName);
+    stagingSheet.clearContents();
+    stagingSheet.getRange(1, 1, 1, CVI_BASELINE_COLUMNS.length).setValues([CVI_BASELINE_COLUMNS]);
+    trimSheetToSize_(stagingSheet, 2, CVI_BASELINE_COLUMNS.length);
+    return true;
+  });
+
+  clearChunkedCviBaselineState_();
+
+  const downstreamContinuation = queueBaselineRefreshContinuation_();
+
+  logRun_('runChunkedCviBaselineFinalize', RUN_STATUS.SUCCESS, 'Direct baseline replace complete. Source exports continuation queued.', {
+    jobId: state.jobId,
+    snapshotDate: state.snapshotDate,
+    sourceRowsScanned: state.sourceRowsScanned,
+    stagedRows: state.stagedRows,
+    skippedRows: state.skippedRows,
+    totalBaselineRows: state.finalizeOutputRows,
+    continuation: downstreamContinuation
+  });
+
+  return {
+    jobId: state.jobId,
+    snapshotDate: state.snapshotDate,
+    sourceRowsScanned: state.sourceRowsScanned,
+    stagedRows: state.stagedRows,
+    skippedRows: state.skippedRows,
     totalBaselineRows: state.finalizeOutputRows,
     continuation: downstreamContinuation
   };
@@ -773,6 +905,48 @@ function ensureChunkedCviStagingSheet_(sheetName) {
     }
     return true;
   });
+}
+
+function resetChunkedCviScratchWorkspace_(stagingSheetName, outputSheetName) {
+  withSpreadsheetRetry_('chunked baseline reset scratch workspace', function () {
+    const ss = SpreadsheetApp.getActive();
+    const outputName = outputSheetName || 'CVI_Baseline_Next';
+    const stagingName = stagingSheetName || 'CVI_Baseline_Staging';
+
+    const sheets = ss.getSheets();
+    sheets.forEach(function (sheet) {
+      const name = sheet.getName();
+      if (name === outputName || /^CVI_Baseline_Old_/i.test(name)) {
+        ss.deleteSheet(sheet);
+      }
+    });
+
+    const stagingSheet = getOrCreateSheet_(stagingName);
+    stagingSheet.clearContents();
+    stagingSheet.getRange(1, 1, 1, CVI_BASELINE_COLUMNS.length).setValues([CVI_BASELINE_COLUMNS]);
+    trimSheetToSize_(stagingSheet, 2, CVI_BASELINE_COLUMNS.length);
+    return true;
+  });
+}
+
+function trimSheetToSize_(sheet, targetRows, targetColumns) {
+  const safeRows = Math.max(2, Number(targetRows) || 2);
+  const safeColumns = Math.max(CVI_BASELINE_COLUMNS.length, Number(targetColumns) || CVI_BASELINE_COLUMNS.length);
+
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > safeRows) {
+    sheet.deleteRows(safeRows + 1, maxRows - safeRows);
+  }
+
+  const maxColumns = sheet.getMaxColumns();
+  if (maxColumns > safeColumns) {
+    sheet.deleteColumns(safeColumns + 1, maxColumns - safeColumns);
+  }
+}
+
+function getCviBaselineRetentionDays_() {
+  // Hub baseline should be a fresh current snapshot only. Historical copies live elsewhere.
+  return 1;
 }
 
 function withSpreadsheetRetry_(label, fn) {

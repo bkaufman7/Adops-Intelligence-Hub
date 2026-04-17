@@ -67,7 +67,7 @@ function seedConfigSheet_() {
     [CONFIG_KEYS.MAPPING_SOURCE_SPREADSHEET_ID, '1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o', 'Project 3/EOM mapping spreadsheet ID'],
     [CONFIG_KEYS.MAPPING_SOURCE_TAB, 'Networks', 'Project 3 mapping tab name'],
     [CONFIG_KEYS.CVI_BASELINE_TAB, 'Data', 'Daily CVI Catch reference tab containing all live placements'],
-    [CONFIG_KEYS.CVI_BASELINE_RETENTION_DAYS, '7', 'Rolling retention window for CVI_Daily_Baseline snapshots'],
+    [CONFIG_KEYS.CVI_BASELINE_RETENTION_DAYS, '1', 'Fresh-snapshot mode for CVI_Daily_Baseline; historical retention is stored outside the Hub'],
     [
       CONFIG_KEYS.SOURCE_PREFIX + 'project1',
       '{"enabled":true,"sourceSystem":"CM360 Audit System","sourceProject":"CM360 Audit System","spreadsheetId":"1MUDE5geWlO9Flmy3vtfCNRrsnpDAMcz0z1uA0Lu2Ilw","exportTab":"CM360_Flagged_Export"}',
