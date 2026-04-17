@@ -72,11 +72,16 @@ function buildRepGrading_() {
     ? (overallFlaggedLivePlacements / overallLivePlacements) * 100
     : model.defaultBaselinePct;
 
-  // Include all reps from current live baseline snapshot so leadership can
-  // see full trafficked coverage even when a rep has zero current issues.
+  // Include all reps from current live baseline snapshot and from Network_Mapping
+  // so leadership can see full rep roster even when a rep has zero current issues.
   const allRepNames = {};
   Object.keys(repStats).forEach(function (repName) { allRepNames[repName] = true; });
   Object.keys(liveCoverage.byRep || {}).forEach(function (repName) { allRepNames[repName] = true; });
+  const networkMapRows = readTable_(SHEETS.NETWORK_MAPPING);
+  networkMapRows.forEach(function (row) {
+    const repName = String(row['Account REP OPS'] || '').trim();
+    if (repName && repName !== 'Unassigned') { allRepNames[repName] = true; }
+  });
 
   Object.keys(allRepNames).forEach(function (repName) {
     const stats = repStats[repName] || {
@@ -804,12 +809,8 @@ function calculateDiagnosticGrade_(issueDensity) {
 }
 
 function calculateConfidenceLabel_(flaggedPlacements, totalLivePlacements, flaggedLivePlacements) {
-  if (!totalLivePlacements) return 'Low';
-  if (!flaggedPlacements) return totalLivePlacements >= 25 ? 'High' : 'Medium';
-
-  const matchPct = flaggedPlacements > 0 ? (flaggedLivePlacements / flaggedPlacements) : 0;
-  if (matchPct >= 0.9 && totalLivePlacements >= 25) return 'High';
-  if (matchPct >= 0.6 && totalLivePlacements >= 10) return 'Medium';
+  if (totalLivePlacements >= 100) return 'High';
+  if (totalLivePlacements >= 25) return 'Medium';
   return 'Low';
 }
 
