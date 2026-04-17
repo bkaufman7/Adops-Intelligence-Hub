@@ -78,10 +78,20 @@ function buildRepGrading_() {
   Object.keys(repStats).forEach(function (repName) { allRepNames[repName] = true; });
   Object.keys(liveCoverage.byRep || {}).forEach(function (repName) { allRepNames[repName] = true; });
   const networkMapRows = readTable_(SHEETS.NETWORK_MAPPING);
+  const networkMappingRepNames = {};
   networkMapRows.forEach(function (row) {
     const repName = String(row['Account REP OPS'] || '').trim();
-    if (repName && repName !== 'Unassigned') { allRepNames[repName] = true; }
+    if (repName && repName !== 'Unassigned') {
+      allRepNames[repName] = true;
+      networkMappingRepNames[repName] = true;
+    }
   });
+
+  const repsFromLedger = countKeys_(repStats);
+  const repsFromLiveCoverage = countKeys_(liveCoverage.byRep || {});
+  const repsFromNetworkMapping = countKeys_(networkMappingRepNames);
+  const repsWithoutLiveCoverage = [];
+  const repsWithNoFlaggedPlacements = [];
 
   Object.keys(allRepNames).forEach(function (repName) {
     const stats = repStats[repName] || {
@@ -93,6 +103,14 @@ function buildRepGrading_() {
 
     const flaggedPlacements = countKeys_(stats.flaggedPlacements);
     const totalLivePlacements = countKeys_(liveInfo.livePlacements);
+
+    if (!totalLivePlacements) {
+      repsWithoutLiveCoverage.push(repName);
+    }
+    if (!flaggedPlacements) {
+      repsWithNoFlaggedPlacements.push(repName);
+    }
+
     const totalTraffickedPlacements = totalLivePlacements;
     const flaggedLivePlacements = intersectCountMaps_(stats.flaggedPlacements, liveInfo.livePlacements);
     const rawFlaggedPct = totalLivePlacements > 0 ? (flaggedLivePlacements / totalLivePlacements) * 100 : null;
@@ -158,6 +176,14 @@ function buildRepGrading_() {
 
   logRun_('buildRepGrading_', RUN_STATUS.SUCCESS, 'Completed', {
     repsGraded: repPerformance.length,
+    repsFromLedger: repsFromLedger,
+    repsFromLiveCoverage: repsFromLiveCoverage,
+    repsFromNetworkMapping: repsFromNetworkMapping,
+    repsWithoutLiveCoverageCount: repsWithoutLiveCoverage.length,
+    repsWithNoFlaggedPlacementsCount: repsWithNoFlaggedPlacements.length,
+    repsWithoutLiveCoverageSample: repsWithoutLiveCoverage.slice(0, 15),
+    repsWithNoFlaggedPlacementsSample: repsWithNoFlaggedPlacements.slice(0, 15),
+    unassignedFlaggedPlacements: repStats.Unassigned ? countKeys_(repStats.Unassigned.flaggedPlacements) : 0,
     topRep: repPerformance.length ? repPerformance[0].repName : null,
     topRepFlaggedPct: repPerformance.length ? formatPercentValue_(repPerformance[0].adjustedFlaggedPct) : 'N/A',
     liveSnapshotDate: liveCoverage.snapshotDate || '',
