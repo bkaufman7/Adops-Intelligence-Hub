@@ -38,11 +38,69 @@ function withRunLogging_(action, fn) {
     // Never let logging failures mask the original pipeline error.
     try {
       logRun_(action, RUN_STATUS.ERROR, String(err), { stack: err && err.stack ? err.stack : '' });
+      notifyRunFailure_(action, err);
     } catch (loggingErr) {
       console.error('Failed to write run log: ' + String(loggingErr));
     }
     throw err;
   }
+}
+
+function notifyRunFailure_(action, err) {
+  const recipients = getAlertRecipients_();
+  if (!recipients.length) {
+    return;
+  }
+
+  const when = new Date();
+  const subject = '[AdOps Hub] Pipeline Failure: ' + String(action || 'Unknown Action');
+  const stack = err && err.stack ? String(err.stack) : '';
+  const body = [
+    'The AdOps Intelligence Hub pipeline hit an error.',
+    '',
+    'Action: ' + String(action || ''),
+    'When: ' + when.toString(),
+    'Error: ' + String(err || ''),
+    '',
+    'Stack:',
+    stack || '(no stack available)',
+    '',
+    'Open the Run_Log tab for full context.'
+  ].join('\n');
+
+  MailApp.sendEmail({
+    to: recipients.join(','),
+    subject: subject,
+    body: body
+  });
+}
+
+function getAlertRecipients_() {
+  const explicit = String(getConfigValue_(CONFIG_KEYS.ALERT_RECIPIENTS, '') || '');
+  if (explicit.trim()) {
+    return parseRecipientList_(explicit);
+  }
+
+  const fallback = String(getConfigValue_(CONFIG_KEYS.WEEKLY_RECIPIENTS, '') || '');
+  return parseRecipientList_(fallback);
+}
+
+function parseRecipientList_(value) {
+  if (!value) {
+    return [];
+  }
+
+  const seen = {};
+  return String(value)
+    .split(',')
+    .map(function (item) { return item.trim(); })
+    .filter(function (item) {
+      if (!item) return false;
+      const lower = item.toLowerCase();
+      if (seen[lower]) return false;
+      seen[lower] = true;
+      return /@/.test(item);
+    });
 }
 
 function appendRunLogRowWithRetry_(row) {

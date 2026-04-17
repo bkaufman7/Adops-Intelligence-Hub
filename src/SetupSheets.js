@@ -63,6 +63,7 @@ function seedInstructionsSheet_() {
 function seedConfigSheet_() {
   clearAndWriteTable_(SHEETS.CONFIG, ['Key', 'Value', 'Description'], [
     [CONFIG_KEYS.WEEKLY_RECIPIENTS, '', 'Comma-separated email recipients for weekly summary'],
+    [CONFIG_KEYS.ALERT_RECIPIENTS, '', 'Comma-separated email recipients for pipeline failure alerts (falls back to weekly_recipients if blank)'],
     [CONFIG_KEYS.AUDIT_EXPORT_FOLDER_ID, '1p3FNU2d4k8eARuPAr6Fhy1c0Y3UYQDzZ', 'Root Drive folder ID for Hub exports; app auto-creates organized subfolders'],
     [CONFIG_KEYS.MAPPING_SOURCE_SPREADSHEET_ID, '1BJpCPZaTEIa852vF5DiZvL9OpScKy0Awe-xXRikph2o', 'Project 3/EOM mapping spreadsheet ID'],
     [CONFIG_KEYS.MAPPING_SOURCE_TAB, 'Networks', 'Project 3 mapping tab name'],

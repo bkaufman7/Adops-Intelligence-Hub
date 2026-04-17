@@ -38,44 +38,71 @@ function setupDailyTrigger() {
 
 function configureAutomationTriggers() {
   return withRunLogging_('setupDailyTrigger', function () {
+    const managedHandlers = [
+      'runBaselineAndFullRefresh',
+      'runChunkedCviBaselineContinuation',
+      'runChunkedCviBaselineFinalize',
+      'runBaselineRefreshContinuation',
+      'runFullRefresh',
+      'runFullRefreshContinuation',
+      'runExecutiveArtifactsContinuation',
+      'runPresentationViewContinuation',
+      'runDeferredGradingContinuation',
+      'runDeferredAdvertiserGradingContinuation'
+    ];
+
     // Remove existing automation triggers to avoid duplicates.
     const triggers = ScriptApp.getProjectTriggers();
     triggers.forEach(function (trigger) {
       const handler = trigger.getHandlerFunction();
-      if (handler === 'runFullRefresh' || handler === 'runFullRefreshContinuation') {
+      if (managedHandlers.indexOf(handler) >= 0) {
         ScriptApp.deleteTrigger(trigger);
       }
     });
 
-    // Create one daily kickoff trigger. runFullRefresh queues continuation automatically.
-    ScriptApp.newTrigger('runFullRefresh')
+    // Create one daily kickoff trigger. The chunked baseline + continuation chain
+    // handles source refresh, summaries, executive/presentation, and grading.
+    ScriptApp.newTrigger('runBaselineAndFullRefresh')
       .timeBased()
       .atHour(6)
       .everyDays(1)
       .create();
 
     logRun_('setupDailyTrigger', RUN_STATUS.SUCCESS, 'Automation trigger configured for 6 AM kickoff', {
-      function: 'runFullRefresh',
+      function: 'runBaselineAndFullRefresh',
       schedule: 'Daily at 6:00 AM',
-      continuation: 'runFullRefreshContinuation is queued automatically by runFullRefresh'
+      continuation: 'Chunked baseline and downstream continuation chain are queued automatically'
     });
 
     return {
       success: true,
       schedule: 'Daily at 6:00 AM',
-      kickoffFunction: 'runFullRefresh',
-      continuationFunction: 'runFullRefreshContinuation (auto-queued)'
+      kickoffFunction: 'runBaselineAndFullRefresh',
+      continuationFunction: 'Chunked baseline + downstream continuations (auto-queued)'
     };
   });
 }
 
 function removeDailyTrigger() {
   return withRunLogging_('removeDailyTrigger', function () {
+    const managedHandlers = [
+      'runBaselineAndFullRefresh',
+      'runChunkedCviBaselineContinuation',
+      'runChunkedCviBaselineFinalize',
+      'runBaselineRefreshContinuation',
+      'runFullRefresh',
+      'runFullRefreshContinuation',
+      'runExecutiveArtifactsContinuation',
+      'runPresentationViewContinuation',
+      'runDeferredGradingContinuation',
+      'runDeferredAdvertiserGradingContinuation'
+    ];
+
     const triggers = ScriptApp.getProjectTriggers();
     let removed = 0;
     triggers.forEach(function (trigger) {
       const handler = trigger.getHandlerFunction();
-      if (handler === 'runFullRefresh' || handler === 'runFullRefreshContinuation') {
+      if (managedHandlers.indexOf(handler) >= 0) {
         ScriptApp.deleteTrigger(trigger);
         removed++;
       }

@@ -91,6 +91,7 @@ const NORMALIZED_LEDGER_COLUMNS = [
 
 const CONFIG_KEYS = {
   WEEKLY_RECIPIENTS: 'weekly_recipients',
+  ALERT_RECIPIENTS: 'alert_recipients',
   AUDIT_EXPORT_FOLDER_ID: 'audit_export_folder_id',
   MAPPING_SOURCE_SPREADSHEET_ID: 'mapping_source_spreadsheet_id',
   MAPPING_SOURCE_TAB: 'mapping_source_tab',
