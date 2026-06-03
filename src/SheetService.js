@@ -1,10 +1,17 @@
 function getOrCreateSheet_(name) {
-  const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
+  const targetName = String(name || '').trim();
+  if (!targetName) {
+    throw new Error('getOrCreateSheet_ requires a non-empty sheet name');
   }
-  return sheet;
+
+  return runSheetWriteWithRetry_('getOrCreateSheet_(' + targetName + ')', function () {
+    const ss = SpreadsheetApp.getActive();
+    let sheet = ss.getSheetByName(targetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(targetName);
+    }
+    return sheet;
+  });
 }
 
 function clearAndWriteTable_(sheetName, headers, rows) {

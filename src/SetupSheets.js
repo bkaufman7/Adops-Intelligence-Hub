@@ -1,16 +1,114 @@
-function setupProjectSheets() {
+function setupProjectSheets(options) {
   return withRunLogging_('setupProjectSheets', function () {
-    seedReadmeSheet_();
-    seedInstructionsSheet_();
-    seedArchitectureMapSheet_();
-    seedDataContractSheet_();
-    seedConfigSheet_();
-    seedWeeklyRecipientsSheet_();
-    seedProjectAccountsSheet_();
-    seedDataSheets_();
-    seedBackfillControlSheet_();
-    getOrCreateSheet_(SHEETS.UI_CONTROL);
-    return { success: true };
+    return setupProjectSheetsCore_(options);
+  });
+}
+
+function setupProjectSheetsCore_(options) {
+  const opts = options || {};
+  const preserveAdminData = opts.preserveAdminData !== false;
+
+  seedReadmeSheet_();
+  seedInstructionsSheet_();
+  seedArchitectureMapSheet_();
+  seedDataContractSheet_();
+  seedConfigSheet_(preserveAdminData);
+  seedWeeklyRecipientsSheet_(preserveAdminData);
+  seedProjectAccountsSheet_(preserveAdminData);
+  seedDataSheets_(preserveAdminData);
+  seedBackfillControlSheet_(preserveAdminData);
+  getOrCreateSheet_(SHEETS.UI_CONTROL);
+  return { success: true };
+}
+
+function archiveCurrentTabsAndBuildNewWorkspace() {
+  return withRunLogging_('archiveCurrentTabsAndBuildNewWorkspace', function () {
+    const archived = runSpreadsheetStepWithRetry_('archiveLegacyDataReportTabs_', function () {
+      return archiveLegacyDataReportTabs_('archive_');
+    });
+
+    const hiddenArchivedTabs = runSpreadsheetStepWithRetry_('hideArchivedTabsByPrefix_', function () {
+      return hideArchivedTabsByPrefix_('archive_');
+    });
+
+    setWorkspaceMigrationState_({
+      status: 'QUEUED',
+      archivedCount: archived.length,
+      hiddenArchivedCount: hiddenArchivedTabs.length,
+      attempts: 0,
+      lastError: ''
+    });
+
+    const continuation = queueWorkspaceMigrationContinuation_(45 * 1000);
+
+    return {
+      archivedCount: archived.length,
+      archivedTabs: archived,
+      hiddenArchivedTabs: hiddenArchivedTabs,
+      newMainTab: SHEETS.EXECUTIVE_SNAPSHOT,
+      continuation: continuation
+    };
+  });
+}
+
+function runArchiveWorkspaceContinuation() {
+  // Intentionally avoid withRunLogging_ here because Run_Log writes can fail
+  // during Spreadsheet service incidents and mark the trigger run as failed.
+  const state = getWorkspaceMigrationState_() || { attempts: 0 };
+  state.attempts = Number(state.attempts || 0) + 1;
+  state.status = 'RUNNING';
+  state.lastError = '';
+  setWorkspaceMigrationState_(state);
+
+  try {
+    runSpreadsheetStepWithRetry_('setupProjectSheetsCore_', function () {
+      return setupProjectSheetsCore_({ preserveAdminData: true });
+    }, { suppressSheetLogging: true });
+    runSpreadsheetStepWithRetry_('organizeSheetTabs', function () {
+      return organizeSheetTabs();
+    }, { suppressSheetLogging: true });
+
+    state.status = 'COMPLETED';
+    setWorkspaceMigrationState_(state);
+    clearWorkspaceMigrationContinuation_();
+    console.log('Workspace migration continuation completed in attempt ' + state.attempts);
+
+    return {
+      success: true,
+      attempts: state.attempts,
+      status: state.status,
+      mainTab: SHEETS.EXECUTIVE_SNAPSHOT
+    };
+  } catch (err) {
+    const retryable = isRetryableSpreadsheetError_(err);
+    state.status = retryable ? 'REQUEUED' : 'FAILED';
+    state.lastError = String(err);
+    setWorkspaceMigrationState_(state);
+
+    if (retryable && state.attempts < 6) {
+      const continuation = queueWorkspaceMigrationContinuation_(90 * 1000);
+      console.warn('Workspace migration requeued after retryable error: ' + String(err));
+      return {
+        success: false,
+        requeued: true,
+        attempts: state.attempts,
+        continuation: continuation,
+        error: String(err)
+      };
+    }
+
+    clearWorkspaceMigrationContinuation_();
+    throw err;
+  }
+}
+
+function hideArchivedTabs() {
+  return withRunLogging_('hideArchivedTabs', function () {
+    const hidden = hideArchivedTabsByPrefix_('archive_');
+    return {
+      hiddenCount: hidden.length,
+      hiddenTabs: hidden
+    };
   });
 }
 
@@ -60,8 +158,14 @@ function seedInstructionsSheet_() {
   ]);
 }
 
-function seedConfigSheet_() {
-  clearAndWriteTable_(SHEETS.CONFIG, ['Key', 'Value', 'Description'], [
+function seedConfigSheet_(preserveExisting) {
+  const headers = ['Key', 'Value', 'Description'];
+  if (preserveExisting && sheetHasDataBeyondHeader_(SHEETS.CONFIG)) {
+    ensureTableHeaders_(SHEETS.CONFIG, headers);
+    return;
+  }
+
+  clearAndWriteTable_(SHEETS.CONFIG, headers, [
     [CONFIG_KEYS.WEEKLY_RECIPIENTS, '', 'Comma-separated email recipients for weekly summary'],
     [CONFIG_KEYS.ALERT_RECIPIENTS, '', 'Comma-separated email recipients for pipeline failure alerts (falls back to weekly_recipients if blank)'],
     [CONFIG_KEYS.AUDIT_EXPORT_FOLDER_ID, '1p3FNU2d4k8eARuPAr6Fhy1c0Y3UYQDzZ', 'Root Drive folder ID for Hub exports; app auto-creates organized subfolders'],
@@ -106,14 +210,25 @@ function seedArchitectureMapSheet_() {
   );
 }
 
-function seedWeeklyRecipientsSheet_() {
-  clearAndWriteTable_(SHEETS.WEEKLY_RECIPIENTS, ['Recipient Email'], []);
+function seedWeeklyRecipientsSheet_(preserveExisting) {
+  const headers = ['Recipient Email'];
+  if (preserveExisting && sheetHasDataBeyondHeader_(SHEETS.WEEKLY_RECIPIENTS)) {
+    ensureTableHeaders_(SHEETS.WEEKLY_RECIPIENTS, headers);
+    return;
+  }
+  clearAndWriteTable_(SHEETS.WEEKLY_RECIPIENTS, headers, []);
 }
 
-function seedProjectAccountsSheet_() {
+function seedProjectAccountsSheet_(preserveExisting) {
+  const headers = ['Project Number', 'Project Name', 'Source System', 'Spreadsheet ID', 'Primary User Account', 'Status', 'Notes'];
+  if (preserveExisting && sheetHasDataBeyondHeader_(SHEETS.PROJECT_ACCOUNTS)) {
+    ensureTableHeaders_(SHEETS.PROJECT_ACCOUNTS, headers);
+    return;
+  }
+
   clearAndWriteTable_(
     SHEETS.PROJECT_ACCOUNTS,
-    ['Project Number', 'Project Name', 'Source System', 'Spreadsheet ID', 'Primary User Account', 'Status', 'Notes'],
+    headers,
     [
       ['Project 1', 'CM360 Audit System', 'CM360 Audit System', '1MUDE5geWlO9Flmy3vtfCNRrsnpDAMcz0z1uA0Lu2Ilw', 'platformsolutionshmi@gmail.com', 'Active', 'Exports to CM360_Flagged_Export'],
       ['Project 2', 'Daily CVI Catch', 'Daily CVI Catch', '1K4RfCJashYD-5AEoMyqJsNCIAmLxusDTvbwk665LWYo', 'platformsolutionsadopshorizon@gmail.com', 'Active', 'Output tab used for hub ingestion'],
@@ -126,8 +241,13 @@ function seedProjectAccountsSheet_() {
   );
 }
 
-function seedDataSheets_() {
-  clearAndWriteTable_(SHEETS.NETWORK_MAPPING, ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS'], []);
+function seedDataSheets_(preserveAdminData) {
+  if (preserveAdminData && sheetHasDataBeyondHeader_(SHEETS.NETWORK_MAPPING)) {
+    ensureTableHeaders_(SHEETS.NETWORK_MAPPING, ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS']);
+  } else {
+    clearAndWriteTable_(SHEETS.NETWORK_MAPPING, ['Network ID', 'Network Name', 'Advertiser', 'Account REP OPS'], []);
+  }
+
   clearAndWriteTable_(SHEETS.CVI_DAILY_BASELINE, CVI_BASELINE_COLUMNS, []);
   clearAndWriteTable_(SHEETS.RAW_IMPORTED_EVENTS, RAW_EVENT_COLUMNS, []);
   clearAndWriteTable_(SHEETS.NORMALIZED_LEDGER, NORMALIZED_LEDGER_COLUMNS, []);
@@ -137,6 +257,13 @@ function seedDataSheets_() {
   clearAndWriteTable_(SHEETS.SUMMARY_BY_ISSUE_TYPE, ['Issue Flags', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.EXECUTIVE_SNAPSHOT, ['Section', 'Metric', 'Value', 'Status'], []);
   clearAndWriteTable_(SHEETS.PRESENTATION_VIEW, ['Leadership Snapshot'], []);
+  clearAndWriteTable_(SHEETS.BILLING_RISK_METER, ['Risk Segment', 'Current Severity Score', 'MTD Severity Score', 'Status'], []);
+  clearAndWriteTable_(SHEETS.TOP_RISK_MOVERS, ['Entity Type', 'Entity Name', 'Score Delta (30d)', 'Current Score', 'Owner', 'Status'], []);
+  clearAndWriteTable_(SHEETS.REP_WORKLOAD_LEADERBOARD, ['Rep', 'Live Placements', 'Flagged Placements', 'Severity Score', 'Workload Index', 'Status'], []);
+  clearAndWriteTable_(SHEETS.ADVERTISER_DISTRIBUTION, ['Grade Band', 'Advertiser Count', 'Share %', 'Notes'], []);
+  clearAndWriteTable_(SHEETS.NETWORK_HEATMAP, ['Network', 'Severity Score', 'Flagged %', 'Trend (30d)', 'Status'], []);
+  clearAndWriteTable_(SHEETS.PIPELINE_HEALTH, ['Check', 'Value', 'Status', 'Last Updated'], []);
+  clearAndWriteTable_(SHEETS.OWNER_ACTION_QUEUE, ['Priority', 'Owner', 'Entity Type', 'Entity Name', 'Issue', 'Due Date', 'Status'], []);
   clearAndWriteTable_(SHEETS.NETWORK_GRADING, ['Network Name', 'Total Issues (All Time)', 'Unique Placements', 'Issues Per Placement', 'Grade', 'Trend', 'Last 7 Days', 'Last 30 Days', 'Avg Issues Per Day (30d)'], []);
   clearAndWriteTable_(SHEETS.GRADING_METHODOLOGY, ['Section', 'Metric', 'Value', 'Notes'], []);
   clearAndWriteTable_(SHEETS.REP_GRADING, ['AdOps Rep Performance Grading'], []);
@@ -145,20 +272,27 @@ function seedDataSheets_() {
   clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, ['Unmapped Networks'], []);
   clearAndWriteTable_(SHEETS.TREND_WEEKLY, ['Event Week', 'Source Project', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.TREND_MONTHLY, ['Event Month', 'Source Project', 'Issue Count'], []);
-  clearAndWriteTable_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context'], []);
+
+  if (preserveAdminData && sheetHasDataBeyondHeader_(SHEETS.RUN_LOG)) {
+    ensureTableHeaders_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context']);
+  } else {
+    clearAndWriteTable_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context'], []);
+  }
+
   writeTabLegendSheet_();
 }
 
 function writeTabLegendSheet_() {
   var rows = [
-    ['🟢 Green',      'Leadership',  'Executive Snapshot, Presentation View',                          'Audience: leadership / stakeholders'],
-    ['🟣 Purple',     'Grading',     'Rep Grading, Advertiser Grading, Network Grading, Diagnostic, Methodology', 'Audience: ops managers'],
-    ['🟠 Orange',     'Summaries',   'Summary By System, By Network, By Issue Type',                  'Audience: ops team'],
-    ['🔵 Teal',       'Trends',      'Trend Weekly, Trend Monthly',                                   'Audience: ops / leadership'],
-    ['⚫ Grey',       'Raw Data',    'Raw Imported Events, Normalized Ledger, Network Summaries, CVI Baseline', 'Internal — source data only'],
-    ['🔵 Blue',       'Config / Ops','Config, Network Mapping, Recipients, Project Accounts, Unmapped, Backfill Control, UI Control', 'Internal — configuration'],
-    ['🔴 Red',        'System',      'Run Log',                                                       'Internal — execution history'],
-    ['🩶 Light Grey', 'Reference',   'README, Instructions, Architecture Map, Data Contract',         'Internal — documentation']
+    ['🟢 Green',      'Leadership',  'Mission Control, Leadership Briefing, Billing Risk Meter, Top Risk Movers', 'Audience: leadership / stakeholders'],
+    ['🟣 Purple',     'Scorecards',  'Rep, Advertiser, Network, Methodology, Diagnostic', 'Audience: leadership + ops managers'],
+    ['🟠 Orange',     'Rollups',     'By Source, By Network, By Issue Type', 'Audience: ops + leadership'],
+    ['🔵 Teal',       'Trends',      'Weekly and Monthly trend monitors', 'Audience: ops / leadership'],
+    ['⚫ Grey',       'Data Core',   'Raw events, normalized ledger, baseline, imported summaries', 'Internal source data layers'],
+    ['🟡 Yellow',     'Operations',  'Owner action queue, unmapped entities, workload leaderboard, pipeline health', 'Operational execution tabs'],
+    ['🔵 Blue',       'Config / Admin','Config, mapping, recipients, accounts, backfill control, UI control', 'Internal configuration'],
+    ['🔴 Red',        'System',      'Run Log', 'Internal execution history'],
+    ['🩶 Light Grey', 'Reference',   'README, Instructions, Architecture Map, Data Contract, Tab Legend', 'Internal documentation']
   ];
   clearAndWriteTable_(SHEETS.TAB_LEGEND, ['Color', 'Group', 'Tabs', 'Notes'], rows);
 }
@@ -171,6 +305,14 @@ function organizeSheetTabs() {
     // Leadership (green)
     SHEETS.EXECUTIVE_SNAPSHOT,
     SHEETS.PRESENTATION_VIEW,
+    SHEETS.BILLING_RISK_METER,
+    SHEETS.TOP_RISK_MOVERS,
+    // Operations (yellow)
+    SHEETS.OWNER_ACTION_QUEUE,
+    SHEETS.REP_WORKLOAD_LEADERBOARD,
+    SHEETS.PIPELINE_HEALTH,
+    SHEETS.NETWORK_HEATMAP,
+    SHEETS.ADVERTISER_DISTRIBUTION,
     // Grading (purple)
     SHEETS.REP_GRADING,
     SHEETS.ADVERTISER_GRADING,
@@ -210,6 +352,13 @@ function organizeSheetTabs() {
   const TAB_COLORS = {
     [SHEETS.EXECUTIVE_SNAPSHOT]:        '#34A853',  // green – leadership
     [SHEETS.PRESENTATION_VIEW]:         '#34A853',
+    [SHEETS.BILLING_RISK_METER]:        '#34A853',
+    [SHEETS.TOP_RISK_MOVERS]:           '#34A853',
+    [SHEETS.OWNER_ACTION_QUEUE]:        '#F4B400',  // yellow – operations
+    [SHEETS.REP_WORKLOAD_LEADERBOARD]:  '#F4B400',
+    [SHEETS.PIPELINE_HEALTH]:           '#F4B400',
+    [SHEETS.NETWORK_HEATMAP]:           '#F4B400',
+    [SHEETS.ADVERTISER_DISTRIBUTION]:   '#F4B400',
     [SHEETS.REP_GRADING]:               '#7B68EE',  // purple – grading
     [SHEETS.ADVERTISER_GRADING]:        '#7B68EE',
     [SHEETS.NETWORK_GRADING]:           '#7B68EE',
@@ -243,23 +392,241 @@ function organizeSheetTabs() {
   TAB_ORDER.slice().reverse().forEach(function(name) {
     var sheet = ss.getSheetByName(name);
     if (!sheet) return;
-    ss.moveActiveSheet && ss.setActiveSheet(sheet);
-    ss.moveActiveSheet(1);
+
+    runSpreadsheetStepWithRetry_('moveActiveSheet:' + name, function () {
+      ss.moveActiveSheet && ss.setActiveSheet(sheet);
+      ss.moveActiveSheet(1);
+      return true;
+    });
   });
 
   // Apply colors
   Object.keys(TAB_COLORS).forEach(function(name) {
     var sheet = ss.getSheetByName(name);
-    if (sheet) sheet.setTabColor(TAB_COLORS[name]);
+    if (!sheet) return;
+
+    runSpreadsheetStepWithRetry_('setTabColor:' + name, function () {
+      sheet.setTabColor(TAB_COLORS[name]);
+      return true;
+    });
+  });
+
+  runSpreadsheetStepWithRetry_('setActiveSheet:MissionControl', function () {
+    const mission = ss.getSheetByName(SHEETS.EXECUTIVE_SNAPSHOT);
+    if (mission) {
+      ss.setActiveSheet(mission);
+    }
+    return true;
   });
 
   SpreadsheetApp.getUi().alert('Tab order and colors updated.');
 }
 
-function seedBackfillControlSheet_() {
+function archiveLegacyDataReportTabs_(prefix) {
+  const archivePrefix = String(prefix || 'archive_');
+  const ss = SpreadsheetApp.getActive();
+  const legacyDataTabs = getLegacyDataReportTabNames_();
+  const renamed = [];
+
+  legacyDataTabs.forEach(function (name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      return;
+    }
+
+    const target = nextUniqueArchivedName_(ss, archivePrefix, name);
+    runSpreadsheetStepWithRetry_('renameSheet:' + name, function () {
+      sheet.setName(target);
+      return true;
+    });
+    renamed.push({ from: name, to: target });
+  });
+
+  return renamed;
+}
+
+function hideArchivedTabsByPrefix_(prefix) {
+  const archivePrefix = String(prefix || 'archive_');
+  const ss = SpreadsheetApp.getActive();
+  const sheets = ss.getSheets();
+  const hidden = [];
+
+  sheets.forEach(function (sheet) {
+    const name = String(sheet.getName() || '');
+    if (name.indexOf(archivePrefix) !== 0) {
+      return;
+    }
+
+    if (typeof sheet.isSheetHidden === 'function' && sheet.isSheetHidden()) {
+      hidden.push(name);
+      return;
+    }
+
+    runSpreadsheetStepWithRetry_('hideSheet:' + name, function () {
+      sheet.hideSheet();
+      return true;
+    });
+    hidden.push(name);
+  });
+
+  return hidden;
+}
+
+function getLegacyDataReportTabNames_() {
+  return [
+    'CVI_Daily_Baseline',
+    'Raw_Imported_Events',
+    'Normalized_Event_Ledger',
+    'Imported_Network_Summaries',
+    'Summary_By_System',
+    'Summary_By_Network',
+    'Summary_By_Issue_Type',
+    'Executive_Snapshot',
+    'Presentation_View',
+    'Network_Grading',
+    'Grading_Methodology',
+    'Rep_Grading',
+    'Rep_Grading_Diagnostic',
+    'Advertiser_Grading',
+    'Unmapped_Networks',
+    'Trend_Weekly',
+    'Trend_Monthly'
+  ];
+}
+
+function nextUniqueArchivedName_(ss, prefix, baseName) {
+  const normalizedBase = String(baseName || '').trim();
+  let candidate = prefix + normalizedBase;
+
+  if (!ss.getSheetByName(candidate)) {
+    return candidate;
+  }
+
+  let i = 2;
+  while (ss.getSheetByName(candidate + '_' + i)) {
+    i += 1;
+  }
+  return candidate + '_' + i;
+}
+
+function sheetHasDataBeyondHeader_(sheetName) {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    return false;
+  }
+
+  const lastRow = sheet.getLastRow();
+  return lastRow > 1;
+}
+
+function ensureTableHeaders_(sheetName, headers) {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
+
+  const expected = (headers || []).map(String);
+  if (!expected.length) {
+    return;
+  }
+
+  const existing = sheet.getLastRow() > 0
+    ? sheet.getRange(1, 1, 1, expected.length).getValues()[0].map(String)
+    : [];
+
+  const mismatch = existing.length !== expected.length || expected.some(function (h, i) {
+    return String(existing[i] || '') !== h;
+  });
+
+  if (mismatch) {
+    sheet.getRange(1, 1, 1, expected.length).setValues([expected]);
+  }
+}
+
+function runSpreadsheetStepWithRetry_(label, fn, options) {
+  const opts = options || {};
+  const suppressSheetLogging = opts.suppressSheetLogging === true;
+  const maxAttempts = 4;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      if (!isRetryableSpreadsheetError_(err) || attempt === maxAttempts) {
+        throw err;
+      }
+      if (suppressSheetLogging) {
+        console.warn('Retryable spreadsheet step failed; retrying: ' + String(label) + ' attempt ' + attempt + '/' + maxAttempts + ' error=' + String(err));
+      } else {
+        logRun_('runSpreadsheetStepWithRetry_', RUN_STATUS.WARNING, 'Retryable spreadsheet step failed; retrying', {
+          label: label,
+          attempt: attempt,
+          maxAttempts: maxAttempts,
+          error: String(err)
+        });
+      }
+      Utilities.sleep(attempt * 500);
+    }
+  }
+}
+
+function queueWorkspaceMigrationContinuation_(delayMs) {
+  const handlerName = 'runArchiveWorkspaceContinuation';
+  clearWorkspaceMigrationContinuation_();
+
+  const safeDelayMs = Math.max(30 * 1000, Number(delayMs) || (60 * 1000));
+  const runAt = new Date(Date.now() + safeDelayMs);
+  ScriptApp.newTrigger(handlerName)
+    .timeBased()
+    .at(runAt)
+    .create();
+
+  return {
+    handler: handlerName,
+    scheduledFor: runAt,
+    delayMs: safeDelayMs
+  };
+}
+
+function clearWorkspaceMigrationContinuation_() {
+  const handlerName = 'runArchiveWorkspaceContinuation';
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+}
+
+function getWorkspaceMigrationState_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('WORKSPACE_MIGRATION_STATE');
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function setWorkspaceMigrationState_(state) {
+  const safe = state || {};
+  safe.updatedAt = new Date().toISOString();
+  PropertiesService.getScriptProperties().setProperty('WORKSPACE_MIGRATION_STATE', JSON.stringify(safe));
+}
+
+function seedBackfillControlSheet_(preserveExisting) {
+  const headers = ['Start Date', 'End Date', 'Source System', 'Mode', 'Status', 'Last Processed Date', 'Operator Notes'];
+  if (preserveExisting && sheetHasDataBeyondHeader_(SHEETS.BACKFILL_CONTROL)) {
+    ensureTableHeaders_(SHEETS.BACKFILL_CONTROL, headers);
+    return;
+  }
+
   clearAndWriteTable_(
     SHEETS.BACKFILL_CONTROL,
-    ['Start Date', 'End Date', 'Source System', 'Mode', 'Status', 'Last Processed Date', 'Operator Notes'],
+    headers,
     [['', '', 'ALL', 'MANUAL', '', '', 'Use Continue Historical Backfill for chunked resumable processing.']]
   );
 }

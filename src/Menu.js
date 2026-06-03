@@ -32,7 +32,11 @@ function onOpen() {
     .addItem('Open Grading Methodology', 'openGradingMethodologySheet')
     .addSubMenu(issueTypeMenu)
     .addItem('Export Audit Detail', 'exportAuditDetail')
+    .addItem('Export Full Data Snapshot', 'exportPopulatedDataSnapshot')
     .addItem('Open Instructions', 'openInstructionsSheet')
+    .addItem('Archive Current Tabs + Build New Workspace', 'archiveCurrentTabsAndBuildNewWorkspace')
+    .addItem('Continue Workspace Migration', 'runArchiveWorkspaceContinuation')
+    .addItem('Hide Archived Tabs', 'hideArchivedTabs')
     .addItem('🗂️ Organize Sheet Tabs', 'organizeSheetTabs')
     .addToUi();
 }

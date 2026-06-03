@@ -36,55 +36,71 @@ function buildRepGrading_() {
       return;
     }
 
-    const repName = String(row['Account REP OPS'] || 'Unassigned').trim() || 'Unassigned';
+    const repNames = getOwnerCoverageKeys_(row['Account REP OPS'] || 'Unassigned');
     const placementId = String(row['Placement ID'] || '').trim();
     const issueType = String(row['Issue Type'] || '').trim();
     const issueFlags = String(row['Issue Flags'] || '').trim();
     const issueDetail = String(row['Issue Detail'] || '').trim();
     const eventDate = parseRepDate_(row['Event Date']);
 
-    if (!repStats[repName]) {
-      repStats[repName] = {
-        flaggedPlacements: {},
-        uniqueIssueKeys: {},
-        last30DaysEvents: 0
-      };
-    }
-
     if (placementId) {
-      // Primary metric: one placement counts once regardless of flag count.
-      repStats[repName].flaggedPlacements[placementId] = true;
       allFlaggedPlacements[placementId] = true;
-      const issueFingerprint = issueType || issueFlags || issueDetail || 'Unknown Issue';
-      repStats[repName].uniqueIssueKeys[placementId + '|' + issueFingerprint] = true;
     }
 
-    if (eventDate >= lookbackDate) {
-      repStats[repName].last30DaysEvents += 1;
-    }
+    repNames.forEach(function (repName) {
+      if (!repStats[repName]) {
+        repStats[repName] = {
+          flaggedPlacements: {},
+          uniqueIssueKeys: {},
+          advertisers: {},
+          last30DaysEvents: 0
+        };
+      }
+
+      if (placementId) {
+        // Primary metric: one placement counts once regardless of flag count.
+        repStats[repName].flaggedPlacements[placementId] = true;
+        const issueFingerprint = issueType || issueFlags || issueDetail || 'Unknown Issue';
+        repStats[repName].uniqueIssueKeys[placementId + '|' + issueFingerprint] = true;
+      }
+
+      repStats[repName].advertisers[advertiser] = true;
+
+      if (eventDate >= lookbackDate) {
+        repStats[repName].last30DaysEvents += 1;
+      }
+    });
   });
 
-  const repPerformance = [];
+  let repPerformance = [];
   const repDiagnostic = [];
-  const overallFlaggedLivePlacements = intersectCountMaps_(allFlaggedPlacements, liveCoverage.allLivePlacements || {});
-  const overallLivePlacements = countKeys_(liveCoverage.allLivePlacements || {});
+  const overallFlaggedLivePlacements = countKeys_(allFlaggedPlacements);
+  const overallLivePlacements = Number(liveCoverage.allLivePlacementsCount || 0);
   const baselinePct = overallLivePlacements > 0
     ? (overallFlaggedLivePlacements / overallLivePlacements) * 100
     : model.defaultBaselinePct;
 
-  // Include all reps from current live baseline snapshot and from Network_Mapping
+  // Include all reps from current live-placement coverage and from Network_Mapping
   // so leadership can see full rep roster even when a rep has zero current issues.
   const allRepNames = {};
   Object.keys(repStats).forEach(function (repName) { allRepNames[repName] = true; });
   Object.keys(liveCoverage.byRep || {}).forEach(function (repName) { allRepNames[repName] = true; });
   const networkMapRows = readTable_(SHEETS.NETWORK_MAPPING);
   const networkMappingRepNames = {};
+  const repToAdvertisersMap = {};
   networkMapRows.forEach(function (row) {
-    const repName = String(row['Account REP OPS'] || '').trim();
-    if (repName && repName !== 'Unassigned') {
-      allRepNames[repName] = true;
-      networkMappingRepNames[repName] = true;
-    }
+    const repNames = getOwnerCoverageKeys_(row['Account REP OPS'] || 'Unassigned');
+    const advertiser = String(row['Advertiser'] || '').trim();
+    repNames.forEach(function (repName) {
+      if (repName && repName !== 'Unassigned') {
+        allRepNames[repName] = true;
+        networkMappingRepNames[repName] = true;
+        if (advertiser) {
+          if (!repToAdvertisersMap[repName]) repToAdvertisersMap[repName] = {};
+          repToAdvertisersMap[repName][advertiser] = true;
+        }
+      }
+    });
   });
 
   const repsFromLedger = countKeys_(repStats);
@@ -92,27 +108,36 @@ function buildRepGrading_() {
   const repsFromNetworkMapping = countKeys_(networkMappingRepNames);
   const repsWithoutLiveCoverage = [];
   const repsWithNoFlaggedPlacements = [];
+  const repsWithFlaggedButNoLiveCoverage = [];
 
   Object.keys(allRepNames).forEach(function (repName) {
     const stats = repStats[repName] || {
       flaggedPlacements: {},
       uniqueIssueKeys: {},
+      advertisers: {},
       last30DaysEvents: 0
     };
-    const liveInfo = liveCoverage.byRep[repName] || { livePlacements: {} };
+    const liveInfo = liveCoverage.byRep[repName] || { livePlacementCount: 0 };
 
     const flaggedPlacements = countKeys_(stats.flaggedPlacements);
-    const totalLivePlacements = countKeys_(liveInfo.livePlacements);
+    const totalLivePlacements = Number(liveInfo.livePlacementCount || 0);
 
     if (!totalLivePlacements) {
       repsWithoutLiveCoverage.push(repName);
+      if (flaggedPlacements > 0) {
+        repsWithFlaggedButNoLiveCoverage.push({
+          repName: repName,
+          flaggedCount: flaggedPlacements,
+          pivotRowsAssignedToThisRep: liveCoverage.coverageRepRows[repName] || 0
+        });
+      }
     }
     if (!flaggedPlacements) {
       repsWithNoFlaggedPlacements.push(repName);
     }
 
     const totalTraffickedPlacements = totalLivePlacements;
-    const flaggedLivePlacements = intersectCountMaps_(stats.flaggedPlacements, liveInfo.livePlacements);
+    const flaggedLivePlacements = flaggedPlacements;
     const rawFlaggedPct = totalLivePlacements > 0 ? (flaggedLivePlacements / totalLivePlacements) * 100 : null;
     const adjustedFlaggedPct = calculateSmoothedPct_(flaggedLivePlacements, totalLivePlacements, baselinePct, model.repSmoothingK);
     const eligibility = getEligibilityLabel_(totalLivePlacements, model.minFullGradeLivePlacements);
@@ -122,6 +147,12 @@ function buildRepGrading_() {
     const uniqueIssues = countKeys_(stats.uniqueIssueKeys);
     const issueDensity = flaggedPlacements > 0 ? (uniqueIssues / flaggedPlacements) : 0;
     const diagnosticGrade = calculateDiagnosticGrade_(issueDensity);
+
+    const noTrafficAdvertisers = totalLivePlacements < 200
+      ? (Object.keys(stats.advertisers).length > 0
+          ? Object.keys(stats.advertisers).sort().join(', ')
+          : Object.keys(repToAdvertisersMap[repName] || {}).sort().join(', '))
+      : '';
 
     repPerformance.push({
       repName: repName,
@@ -134,7 +165,8 @@ function buildRepGrading_() {
       grade: performanceGrade,
       confidence: confidence,
       totalTraffickedPlacements: totalTraffickedPlacements,
-      issueDensity: issueDensity
+      issueDensity: issueDensity,
+      noTrafficAdvertisers: noTrafficAdvertisers
     });
 
     repDiagnostic.push({
@@ -146,12 +178,7 @@ function buildRepGrading_() {
     });
   });
 
-  repPerformance.sort(function (a, b) {
-    const aScore = a.adjustedFlaggedPct === null ? -1 : a.adjustedFlaggedPct;
-    const bScore = b.adjustedFlaggedPct === null ? -1 : b.adjustedFlaggedPct;
-    if (bScore !== aScore) return bScore - aScore;
-    return b.flaggedPlacements - a.flaggedPlacements;
-  });
+  repPerformance = orderRepPerformanceRows_(repPerformance);
 
   repDiagnostic.sort(function (a, b) {
     if (b.issueDensity !== a.issueDensity) return b.issueDensity - a.issueDensity;
@@ -183,6 +210,7 @@ function buildRepGrading_() {
     repsWithNoFlaggedPlacementsCount: repsWithNoFlaggedPlacements.length,
     repsWithoutLiveCoverageSample: repsWithoutLiveCoverage.slice(0, 15),
     repsWithNoFlaggedPlacementsSample: repsWithNoFlaggedPlacements.slice(0, 15),
+    repsWithFlaggedButNoLiveCoverageSample: repsWithFlaggedButNoLiveCoverage.slice(0, 10),
     unassignedFlaggedPlacements: repStats.Unassigned ? countKeys_(repStats.Unassigned.flaggedPlacements) : 0,
     topRep: repPerformance.length ? repPerformance[0].repName : null,
     topRepFlaggedPct: repPerformance.length ? formatPercentValue_(repPerformance[0].adjustedFlaggedPct) : 'N/A',
@@ -226,8 +254,8 @@ function buildAdvertiserGrading_() {
 
   const liveCoverage = buildLatestLivePlacementCoverageByAdvertiserFast_(targetAdvertisers);
   const advStats = {};
-  const overallFlaggedLivePlacements = intersectCountMaps_(allFlaggedPlacements, liveCoverage.allLivePlacements || {});
-  const overallLivePlacements = countKeys_(liveCoverage.allLivePlacements || {});
+  const overallFlaggedLivePlacements = countKeys_(allFlaggedPlacements);
+  const overallLivePlacements = Number(liveCoverage.allLivePlacementsCount || 0);
   const baselinePct = overallLivePlacements > 0
     ? (overallFlaggedLivePlacements / overallLivePlacements) * 100
     : model.defaultBaselinePct;
@@ -253,11 +281,10 @@ function buildAdvertiserGrading_() {
   const rows = [];
   Object.keys(advStats).forEach(function (advertiser) {
     const flaggedPlacementsMap = advStats[advertiser].flaggedPlacements;
-    const livePlacementsMap = (liveCoverage.byAdvertiser[advertiser] && liveCoverage.byAdvertiser[advertiser].livePlacements) || {};
 
     const flaggedPlacements = countKeys_(flaggedPlacementsMap);
-    const totalLivePlacements = countKeys_(livePlacementsMap);
-    const flaggedLivePlacements = intersectCountMaps_(flaggedPlacementsMap, livePlacementsMap);
+    const totalLivePlacements = Number((liveCoverage.byAdvertiser[advertiser] && liveCoverage.byAdvertiser[advertiser].livePlacementCount) || 0);
+    const flaggedLivePlacements = flaggedPlacements;
     const rawFlaggedPct = totalLivePlacements > 0 ? (flaggedLivePlacements / totalLivePlacements) * 100 : null;
     const adjustedFlaggedPct = calculateSmoothedPct_(flaggedLivePlacements, totalLivePlacements, baselinePct, model.advertiserSmoothingK);
     const eligibility = getEligibilityLabel_(totalLivePlacements, model.minFullGradeLivePlacements);
@@ -306,14 +333,12 @@ function repPerformanceHeaders_() {
     'Rank',
     'Rep',
     'Grade',
-    'Eligibility',
-    'Adjusted Flagged %',
     'Raw Flagged %',
     'Flagged Live Placements',
     'Total Trafficked Placements (Snapshot)',
-    'Unflagged Live Placements',
     'Flagged/Live Ratio',
-    'Confidence'
+    'Confidence',
+    'Advertisers w/ No Traffic'
   ];
 }
 
@@ -344,27 +369,61 @@ function advertiserPerformanceHeaders_() {
   ];
 }
 
+function orderRepPerformanceRows_(rows) {
+  const groupedRows = [];
+  const individualRows = [];
+  const unassignedRows = [];
+
+  rows.forEach(function (row) {
+    if (isUnassignedOwner_(row.repName)) {
+      unassignedRows.push(row);
+      return;
+    }
+
+    if (isCombinedOwnerGroup_(row.repName)) {
+      groupedRows.push(row);
+      return;
+    }
+    individualRows.push(row);
+  });
+
+  groupedRows.sort(compareRepNamesAlphabetically_);
+  individualRows.sort(compareRepNamesAlphabetically_);
+  unassignedRows.sort(compareRepNamesAlphabetically_);
+
+  return groupedRows.concat(individualRows, unassignedRows);
+}
+
+function compareRepNamesAlphabetically_(a, b) {
+  return String(a.repName || '').localeCompare(String(b.repName || ''), undefined, { sensitivity: 'base' });
+}
+
+function isCombinedOwnerGroup_(ownerValue) {
+  return String(ownerValue || '').indexOf('/') >= 0;
+}
+
+function isUnassignedOwner_(ownerValue) {
+  return String(ownerValue || '').trim().toLowerCase() === 'unassigned';
+}
+
 function writeRepPerformanceTable_(rows) {
   const headers = repPerformanceHeaders_();
   const tableRows = rows.map(function (item, index) {
-    const unflaggedLivePlacements = Math.max(0, Number(item.totalTraffickedPlacements || 0) - Number(item.flaggedLivePlacements || 0));
     return [
       index + 1,
       item.repName,
       item.grade,
-      item.eligibility,
-      formatPercentValue_(item.adjustedFlaggedPct),
       formatPercentValue_(item.rawFlaggedPct),
       item.flaggedLivePlacements,
       item.totalTraffickedPlacements,
-      unflaggedLivePlacements,
       formatPlacementRatio_(item.flaggedLivePlacements, item.totalTraffickedPlacements),
-      item.confidence
+      item.confidence,
+      item.noTrafficAdvertisers || ''
     ];
   });
 
   clearAndWriteTable_(SHEETS.REP_GRADING, headers, tableRows);
-  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 11, 5, 11, tableRows);
+  formatPerformanceSheet_(SHEETS.REP_GRADING, tableRows.length, 9, 4, 8, tableRows);
 }
 
 function writeRepDiagnosticTable_(rows) {
@@ -480,6 +539,34 @@ function formatPerformanceSheet_(sheetName, rowCount, colCount, flaggedPctCol, c
     }
     sheet.getRange(2, confidenceCol, rowCount, 1).setBackgrounds(confBackgrounds).setFontColors(confFontColors);
   }
+
+  applyPerformanceNumberFormats_(sheetName, sheet, rowCount);
+}
+
+function applyPerformanceNumberFormats_(sheetName, sheet, rowCount) {
+  if (rowCount <= 0) {
+    return;
+  }
+
+  if (sheetName === SHEETS.REP_GRADING) {
+    sheet.getRange(2, 1, rowCount, 1).setNumberFormat('0');
+    sheet.getRange(2, 5, rowCount, 1).setNumberFormat('#,##0');
+    sheet.getRange(2, 6, rowCount, 1).setNumberFormat('#,##0');
+    return;
+  }
+
+  if (sheetName === SHEETS.ADVERTISER_GRADING) {
+    sheet.getRange(2, 1, rowCount, 1).setNumberFormat('0');
+    sheet.getRange(2, 7, rowCount, 1).setNumberFormat('#,##0');
+    sheet.getRange(2, 8, rowCount, 1).setNumberFormat('#,##0');
+    return;
+  }
+
+  if (sheetName === SHEETS.REP_GRADING_DIAGNOSTIC) {
+    sheet.getRange(2, 1, rowCount, 1).setNumberFormat('0');
+    sheet.getRange(2, 4, rowCount, 1).setNumberFormat('#,##0');
+    sheet.getRange(2, 5, rowCount, 1).setNumberFormat('#,##0');
+  }
 }
 
 function applyHeaderNotes_(sheetName, sheet, colCount) {
@@ -515,15 +602,12 @@ function writeLegendTableForSheet_(sheetName, sheet, dataLastCol) {
 function getHeaderNotesBySheet_(sheetName) {
   if (sheetName === SHEETS.REP_GRADING) {
     return {
-      'Rank': 'Position after sorting by Adjusted Flagged % (descending), then flagged placements.',
+      'Rank': 'Presentation order: grouped owner strings first (alphabetical), then individual reps (alphabetical), then Unassigned at the bottom when present.',
       'Rep': 'Account REP OPS owner from mapping / normalized ledger.',
       'Grade': 'Primary performance grade using Adjusted Flagged % and live-placement eligibility rules.',
-      'Eligibility': 'Full Grade when total live placements >= threshold; otherwise Monitor.',
-      'Adjusted Flagged %': 'Smoothed flagged-live rate used for grading to reduce small-sample volatility.',
-      'Raw Flagged %': 'Exact flagged-live rate before smoothing: flagged live placements / total live placements.',
-      'Flagged Live Placements': 'Count of unique flagged placements that are also present in latest live snapshot.',
-      'Total Trafficked Placements (Snapshot)': 'Distinct placement IDs trafficked for the rep in the latest CVI baseline snapshot (mapped via Network ID or Advertiser).',
-      'Unflagged Live Placements': 'Distinct trafficked placement IDs in the latest snapshot that are not flagged for the rep (Total Trafficked - Flagged Live).',
+      'Raw Flagged %': 'Exact flagged rate before smoothing: unique flagged placements from the ledger divided by total live placements from Live Placements Pivot.',
+      'Flagged Live Placements': 'Count of unique flagged placements from the normalized ledger for the rep.',
+      'Total Trafficked Placements (Snapshot)': 'Live Placement Count from Live Placements Pivot for the rep. Combined owner strings are kept and slash-delimited owners are also indexed individually.',
       'Flagged/Live Ratio': 'Readable ratio form of flagged live placements versus total trafficked placements.',
       'Confidence': 'Signal quality label derived from denominator size and observed flagged volume.'
     };
@@ -536,9 +620,9 @@ function getHeaderNotesBySheet_(sheetName) {
       'Grade': 'Primary performance grade using Adjusted Flagged % and live-placement eligibility rules.',
       'Eligibility': 'Full Grade when total live placements >= threshold; otherwise Monitor.',
       'Adjusted Flagged %': 'Smoothed flagged-live rate used for grading to reduce small-sample volatility.',
-      'Raw Flagged %': 'Exact flagged-live rate before smoothing: flagged live placements / total live placements.',
-      'Flagged Live Placements': 'Count of unique flagged placements that are also present in latest live snapshot.',
-      'Total Live Placements': 'Count of unique live placements for the advertiser in the latest snapshot.',
+      'Raw Flagged %': 'Exact flagged rate before smoothing: unique flagged placements from the ledger divided by total live placements from Live Placements Pivot.',
+      'Flagged Live Placements': 'Count of unique flagged placements from the normalized ledger for the advertiser.',
+      'Total Live Placements': 'Live Placement Count from Live Placements Pivot for the advertiser.',
       'Flagged/Live Ratio': 'Readable ratio form of flagged live placements versus total live placements.',
       'Confidence': 'Signal quality label derived from denominator size and observed flagged volume.'
     };
@@ -572,14 +656,12 @@ function getLegendRowsBySheet_(sheetName) {
   if (sheetName === SHEETS.REP_GRADING) {
     return [
       ['Grade', 'Primary performance grade from adjusted flagged-live rate and eligibility.'],
-      ['Eligibility', 'Full Grade at/above live-placement threshold; Monitor below threshold.'],
-      ['Adjusted Flagged %', 'Smoothed flagged-live percent used for grading decisions.'],
       ['Raw Flagged %', 'Unsmoothed flagged-live percent for transparency.'],
-      ['Flagged Live Placements', 'Flagged placements that are also in the latest live baseline snapshot.'],
-      ['Total Trafficked Placements (Snapshot)', 'All distinct placement IDs for the rep in the current CVI baseline snapshot, including those with zero issues.'],
-      ['Unflagged Live Placements', 'Live placements currently trafficked for the rep that have no flagged issue in the current grading window.'],
+      ['Flagged Live Placements', 'Unique flagged placements from the normalized ledger for the rep.'],
+      ['Total Trafficked Placements (Snapshot)', 'Live Placement Count from Live Placements Pivot for the rep.'],
       ['Flagged/Live Ratio', 'Flagged live placements divided by total trafficked placements.'],
-      ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.']
+      ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.'],
+      ['Advertisers w/ No Traffic', 'Advertisers assigned to this rep that have fewer than 200 total trafficked placements in the current snapshot. Populated from the normalized ledger or Network_Mapping when no ledger activity is present.']
     ];
   }
 
@@ -589,8 +671,8 @@ function getLegendRowsBySheet_(sheetName) {
       ['Eligibility', 'Full Grade at/above live-placement threshold; Monitor below threshold.'],
       ['Adjusted Flagged %', 'Smoothed flagged-live percent used for grading decisions.'],
       ['Raw Flagged %', 'Unsmoothed flagged-live percent for transparency.'],
-      ['Flagged Live Placements', 'Flagged placements that are also in the latest live baseline snapshot.'],
-      ['Total Live Placements', 'Latest baseline denominator for the advertiser.'],
+      ['Flagged Live Placements', 'Unique flagged placements from the normalized ledger for the advertiser.'],
+      ['Total Live Placements', 'Live Placement Count from Live Placements Pivot for the advertiser.'],
       ['Flagged/Live Ratio', 'Same signal as percentages, shown as count ratio.'],
       ['Confidence', 'High/Medium/Low confidence based on sample size and signal strength.']
     ];
@@ -622,94 +704,174 @@ function getLegendRowsBySheet_(sheetName) {
 }
 
 function buildLatestLivePlacementCoverageByRepFast_(mapping) {
-  const sheet = getOrCreateSheet_(SHEETS.CVI_DAILY_BASELINE);
-  const values = sheet.getDataRange().getValues();
+  const pivot = readLivePlacementPivotRows_();
+  const byRep = {};
+  const coverageRepRows = {};
+  let allLivePlacementsCount = 0;
 
+  pivot.rows.forEach(function (row) {
+    const advertiser = String(row.advertiser || '').trim();
+    if (isExcludedForGrading_(advertiser)) {
+      return;
+    }
+
+    const livePlacementCount = Math.max(0, toNumberOrZero_(row.livePlacementCount));
+    const repNames = getOwnerCoverageKeys_(row.ownerOps);
+    allLivePlacementsCount += livePlacementCount;
+
+    repNames.forEach(function (repName) {
+      if (!byRep[repName]) {
+        byRep[repName] = { livePlacementCount: 0 };
+      }
+
+      byRep[repName].livePlacementCount += livePlacementCount;
+      coverageRepRows[repName] = (coverageRepRows[repName] || 0) + 1;
+    });
+  });
+
+  return {
+    snapshotDate: '',
+    byRep: byRep,
+    allLivePlacementsCount: allLivePlacementsCount,
+    baselineRowsScanned: pivot.rowsScanned,
+    snapshotRowsScanned: pivot.rowsScanned,
+    coverageRepRows: coverageRepRows
+  };
+}
+
+function getProject3SourceConfig_() {
+  const sources = getEnabledSources_();
+  const eom = sources.find(function (sourceCfg) {
+    return sourceCfg && sourceCfg.sourceSystem === SOURCE_SYSTEMS.PROJECT_3_EOM;
+  });
+
+  if (!eom) {
+    throw new Error('Enabled source config not found for ' + SOURCE_SYSTEMS.PROJECT_3_EOM);
+  }
+
+  if (!eom.spreadsheetId) {
+    throw new Error('Missing spreadsheetId for ' + SOURCE_SYSTEMS.PROJECT_3_EOM);
+  }
+
+  return eom;
+}
+
+function getOwnerCoverageKeys_(ownerValue) {
+  const unique = {};
+  const normalizedParts = String(ownerValue || '')
+    .split('/')
+    .map(function (part) {
+      return normalizeOwnerToken_(part);
+    })
+    .filter(function (value) {
+      return value && !isExcludedOwnerToken_(value);
+    });
+
+  const keys = [];
+
+  if (normalizedParts.length > 1) {
+    keys.push(normalizedParts.join('/'));
+  }
+
+  if (normalizedParts.length === 0) {
+    normalizedParts.push('Unassigned');
+  }
+
+  normalizedParts.forEach(function (value) {
+    keys.push(value);
+  });
+
+  return keys.filter(function (value) {
+    if (unique[value]) {
+      return false;
+    }
+
+    unique[value] = true;
+    return true;
+  });
+}
+
+function normalizeOwnerToken_(value) {
+  const token = String(value || '').trim();
+  if (!token) {
+    return '';
+  }
+
+  if (token.toLowerCase() === 'kim') {
+    return 'Kim';
+  }
+
+  return token;
+}
+
+function isExcludedOwnerToken_(value) {
+  return String(value || '').trim().toLowerCase() === 'search';
+}
+
+function readLivePlacementPivotRows_() {
+  const sourceCfg = getProject3SourceConfig_();
+  const pivotTabName = 'Live Placements Pivot';
+  const spreadsheet = SpreadsheetApp.openById(sourceCfg.spreadsheetId);
+  const tab = spreadsheet.getSheetByName(pivotTabName);
+
+  if (!tab) {
+    logRun_('readLivePlacementPivotRows_', RUN_STATUS.WARNING, 'Missing live placements pivot tab', {
+      spreadsheetId: sourceCfg.spreadsheetId,
+      tab: pivotTabName
+    });
+    return {
+      rows: [],
+      rowsScanned: 0
+    };
+  }
+
+  const values = tab.getDataRange().getValues();
   if (!values || values.length < 2) {
     return {
-      snapshotDate: '',
-      byRep: {},
-      allLivePlacements: {},
-      baselineRowsScanned: 0,
-      snapshotRowsScanned: 0
+      rows: [],
+      rowsScanned: 0
     };
   }
 
-  const headers = values[0] || [];
-  const snapshotDateIdx = headers.indexOf('Snapshot Date');
-  const placementIdIdx = headers.indexOf('Placement ID');
-  const networkIdIdx = headers.indexOf('Network ID');
+  const headers = values[0].map(String);
+  const ownerIdx = headers.indexOf('Owner (Ops)');
   const advertiserIdx = headers.indexOf('Advertiser');
+  const countIdx = headers.indexOf('Live Placement Count');
 
-  if (snapshotDateIdx < 0 || placementIdIdx < 0) {
+  if (ownerIdx < 0 || advertiserIdx < 0 || countIdx < 0) {
+    logRun_('readLivePlacementPivotRows_', RUN_STATUS.WARNING, 'Live placements pivot is missing expected headers', {
+      spreadsheetId: sourceCfg.spreadsheetId,
+      tab: pivotTabName,
+      headers: headers
+    });
     return {
-      snapshotDate: '',
-      byRep: {},
-      allLivePlacements: {},
-      baselineRowsScanned: Math.max(0, values.length - 1),
-      snapshotRowsScanned: 0
+      rows: [],
+      rowsScanned: Math.max(0, values.length - 1)
     };
   }
 
-  const dateCache = {};
-  let latestSnapshotDate = '';
-
+  const rows = [];
   for (var i = 1; i < values.length; i++) {
-    const snapshotDate = normalizeSnapshotDateWithCache_(values[i][snapshotDateIdx], dateCache);
-    if (snapshotDate && snapshotDate > latestSnapshotDate) {
-      latestSnapshotDate = snapshotDate;
-    }
-  }
+    const row = values[i] || [];
+    const ownerOps = String(row[ownerIdx] || '').trim();
+    const advertiser = String(row[advertiserIdx] || '').trim();
+    const livePlacementRaw = row[countIdx];
+    const isBlankSeparator = !ownerOps && !advertiser && (livePlacementRaw === '' || livePlacementRaw === null || livePlacementRaw === undefined);
 
-  if (!latestSnapshotDate) {
-    return {
-      snapshotDate: '',
-      byRep: {},
-      allLivePlacements: {},
-      baselineRowsScanned: Math.max(0, values.length - 1),
-      snapshotRowsScanned: 0
-    };
-  }
-
-  const byRep = {};
-  const allLivePlacements = {};
-  let snapshotRowsScanned = 0;
-
-  for (var j = 1; j < values.length; j++) {
-    if (normalizeSnapshotDateWithCache_(values[j][snapshotDateIdx], dateCache) !== latestSnapshotDate) {
-      continue;
+    if (isBlankSeparator) {
+      break;
     }
 
-    snapshotRowsScanned += 1;
-
-    const placementId = String(values[j][placementIdIdx] || '').trim();
-    if (!placementId) {
-      continue;
-    }
-
-    const networkId = networkIdIdx >= 0 ? String(values[j][networkIdIdx] || '').trim() : '';
-    const advertiserRaw = advertiserIdx >= 0 ? String(values[j][advertiserIdx] || '').trim() : '';
-    if (isExcludedForGrading_(advertiserRaw)) {
-      continue;
-    }
-    const advertiser = advertiserRaw.toLowerCase();
-    const mapHit = (mapping && (mapping['id:' + networkId] || mapping['advertiser:' + advertiser])) || {};
-    const repName = String(mapHit['Account REP OPS'] || '').trim() || 'Unassigned';
-
-    if (!byRep[repName]) {
-      byRep[repName] = { livePlacements: {} };
-    }
-
-    byRep[repName].livePlacements[placementId] = true;
-    allLivePlacements[placementId] = true;
+    rows.push({
+      ownerOps: ownerOps,
+      advertiser: advertiser,
+      livePlacementCount: livePlacementRaw
+    });
   }
 
   return {
-    snapshotDate: latestSnapshotDate,
-    byRep: byRep,
-    allLivePlacements: allLivePlacements,
-    baselineRowsScanned: Math.max(0, values.length - 1),
-    snapshotRowsScanned: snapshotRowsScanned
+    rows: rows,
+    rowsScanned: rows.length
   };
 }
 
@@ -729,8 +891,11 @@ function getGradingModel_() {
     repSmoothingK: 25,
     advertiserSmoothingK: 40,
     defaultBaselinePct: 5,
-    repThresholds: { a: 4, b: 6, c: 9, d: 13 },
-    advertiserThresholds: { a: 5, b: 8, c: 12, d: 18 }
+    repThresholds: { a: 3, b: 6, c: 9, d: 15 },
+    advertiserThresholds: { a: 5, b: 8, c: 12, d: 18 },
+    // Low-volume reps normally get "Monitor", but if their adjusted flagged %
+    // exceeds this cap they are too problematic to leave unlabeled.
+    monitorOverrideThreshold: 50
   };
 }
 
@@ -767,6 +932,11 @@ function calculatePerformanceGradeByEntity_(adjustedFlaggedPct, totalLivePlaceme
     return 'N/A';
   }
   if (totalLivePlacements < model.minFullGradeLivePlacements) {
+    // Override: extreme ratio on low volume is still an F, not a Monitor.
+    if (adjustedFlaggedPct !== null && adjustedFlaggedPct !== undefined &&
+        !isNaN(adjustedFlaggedPct) && adjustedFlaggedPct > model.monitorOverrideThreshold) {
+      return 'F';
+    }
     return 'Monitor';
   }
   if (adjustedFlaggedPct === null || adjustedFlaggedPct === undefined || isNaN(adjustedFlaggedPct)) {
@@ -788,11 +958,12 @@ function writeGradingMethodologySheet_(context) {
     ['Model Overview', 'Primary Metric', 'Flagged live placements / total live placements', 'One placement counts once.'],
     ['Model Overview', 'Smoothing Formula', 'adjusted = (flaggedLive + k * baselineRate) / (live + k)', 'Reduces low-volume volatility.'],
     ['Model Inputs', 'Dynamic Baseline Rate', formatPercentValue_(ctx.baselinePct), 'Calculated from current export: flagged live / total live.'],
-    ['Model Inputs', 'Live Placements In Baseline', Number(ctx.overallLivePlacements || 0), 'Latest CVI snapshot live denominator.'],
-    ['Model Inputs', 'Flagged Live Placements', Number(ctx.overallFlaggedLivePlacements || 0), 'Intersection of flagged and latest live placements.'],
+    ['Model Inputs', 'Live Placements In Pivot', Number(ctx.overallLivePlacements || 0), 'Live Placement Count total from Live Placements Pivot, stopping at the first fully blank separator row.'],
+    ['Model Inputs', 'Flagged Live Placements', Number(ctx.overallFlaggedLivePlacements || 0), 'Unique flagged placements from the normalized ledger.'],
     ['Eligibility', 'Full Grade Threshold', model.minFullGradeLivePlacements, 'Entities below threshold are marked Monitor.'],
+    ['Eligibility', 'Monitor Override Threshold', model.monitorOverrideThreshold + '%', 'Low-volume entities with adjusted flagged % above this are graded F instead of Monitor.'],
     ['Eligibility', 'Excluded From Grading', 'xARCHIVE_, archive_, test_, qa_, sandbox_, dummy_, sample_', 'Excluded from all grading tabs by prefix rule.'],
-    ['Rep Thresholds', 'A/B/C/D/F (Adjusted %)', '<=4 / <=6 / <=9 / <=13 / >13', 'Applied only when live placements >= threshold.'],
+    ['Rep Thresholds', 'A/B/C/D/F (Adjusted %)', '<=3 / <=6 / <=9 / <=15 / >15', 'Applied only when live placements >= threshold.'],
     ['Advertiser Thresholds', 'A/B/C/D/F (Adjusted %)', '<=5 / <=8 / <=12 / <=18 / >18', 'Applied only when live placements >= threshold.'],
     ['Smoothing', 'Rep k', model.repSmoothingK, 'Lower k = more sensitive.'],
     ['Smoothing', 'Advertiser k', model.advertiserSmoothingK, 'Higher k for higher low-volume noise.'],
@@ -970,102 +1141,50 @@ function buildLatestLivePlacementCoverageByAdvertiser_() {
 }
 
 function buildLatestLivePlacementCoverageByAdvertiserFast_(targetAdvertisers) {
-  const sheet = getOrCreateSheet_(SHEETS.CVI_DAILY_BASELINE);
-  const values = sheet.getDataRange().getValues();
-
-  if (!values || values.length < 2) {
-    return {
-      snapshotDate: '',
-      byAdvertiser: {},
-      allLivePlacements: {},
-      baselineRowsScanned: 0,
-      snapshotRowsScanned: 0
-    };
-  }
-
-  const headers = values[0] || [];
-  const snapshotDateIdx = headers.indexOf('Snapshot Date');
-  const placementIdIdx = headers.indexOf('Placement ID');
-  const advertiserIdx = headers.indexOf('Advertiser');
-
-  if (snapshotDateIdx < 0 || placementIdIdx < 0 || advertiserIdx < 0) {
-    return {
-      snapshotDate: '',
-      byAdvertiser: {},
-      allLivePlacements: {},
-      baselineRowsScanned: Math.max(0, values.length - 1),
-      snapshotRowsScanned: 0
-    };
-  }
-
-  const dateCache = {};
-  let latestSnapshotDate = '';
-
-  for (var i = 1; i < values.length; i++) {
-    const snapshotDate = normalizeSnapshotDateWithCache_(values[i][snapshotDateIdx], dateCache);
-    if (snapshotDate && snapshotDate > latestSnapshotDate) {
-      latestSnapshotDate = snapshotDate;
-    }
-  }
-
-  if (!latestSnapshotDate) {
-    return {
-      snapshotDate: '',
-      byAdvertiser: {},
-      allLivePlacements: {},
-      baselineRowsScanned: Math.max(0, values.length - 1),
-      snapshotRowsScanned: 0
-    };
-  }
-
+  const pivot = readLivePlacementPivotRows_();
   const target = targetAdvertisers || {};
   const byAdvertiser = {};
-  const allLivePlacements = {};
-  let snapshotRowsScanned = 0;
+  let allLivePlacementsCount = 0;
 
-  for (var j = 1; j < values.length; j++) {
-    if (normalizeSnapshotDateWithCache_(values[j][snapshotDateIdx], dateCache) !== latestSnapshotDate) {
-      continue;
-    }
-
-    snapshotRowsScanned += 1;
-
-    const placementId = String(values[j][placementIdIdx] || '').trim();
-    if (!placementId) {
-      continue;
-    }
-
-    const advertiser = String(values[j][advertiserIdx] || 'Unknown').trim() || 'Unknown';
+  pivot.rows.forEach(function (row) {
+    const advertiser = String(row.advertiser || 'Unknown').trim() || 'Unknown';
     if (isExcludedForGrading_(advertiser)) {
-      continue;
+      return;
     }
-    const advertiserKey = advertiser.toLowerCase();
 
-    if (!target[advertiserKey]) {
-      continue;
+    const livePlacementCount = Math.max(0, toNumberOrZero_(row.livePlacementCount));
+    allLivePlacementsCount += livePlacementCount;
+
+    if (!target[advertiser.toLowerCase()]) {
+      return;
     }
 
     if (!byAdvertiser[advertiser]) {
-      byAdvertiser[advertiser] = { livePlacements: {} };
+      byAdvertiser[advertiser] = { livePlacementCount: 0 };
     }
 
-    byAdvertiser[advertiser].livePlacements[placementId] = true;
-    allLivePlacements[placementId] = true;
-  }
+    byAdvertiser[advertiser].livePlacementCount += livePlacementCount;
+  });
 
   return {
-    snapshotDate: latestSnapshotDate,
+    snapshotDate: '',
     byAdvertiser: byAdvertiser,
-    allLivePlacements: allLivePlacements,
-    baselineRowsScanned: Math.max(0, values.length - 1),
-    snapshotRowsScanned: snapshotRowsScanned
+    allLivePlacementsCount: allLivePlacementsCount,
+    baselineRowsScanned: pivot.rowsScanned,
+    snapshotRowsScanned: pivot.rowsScanned
   };
 }
 
 function resolveBaselineRepAndNetwork_(row, mapping) {
   const networkId = String(row['Network ID'] || '').trim();
+  const networkNameKey = String(row['Network Name'] || '').trim().toLowerCase();
   const advertiser = String(row['Advertiser'] || '').trim().toLowerCase();
-  const mapHit = (mapping && (mapping['id:' + networkId] || mapping['advertiser:' + advertiser])) || {};
+  const mapHit = (mapping && (
+    mapping['id:' + networkId] ||
+    mapping['name:' + networkNameKey] ||
+    mapping['advertiser:' + networkNameKey] ||
+    mapping['advertiser:' + advertiser]
+  )) || {};
 
   const repName = String(mapHit['Account REP OPS'] || '').trim() || 'Unassigned';
   const networkName = String(mapHit['Network Name'] || '').trim() || String(row['Advertiser'] || '').trim() || 'Unknown';
