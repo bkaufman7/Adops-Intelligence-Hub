@@ -175,7 +175,7 @@ function importProject3Rows_(sourceCfg) {
 
   const advertiserMismatches = {};
 
-  return values.slice(1).filter(function (row) {
+  const events = values.slice(1).filter(function (row) {
     return !isBlankImportedRow_(row);
   }).map(function (row) {
     const data = {};

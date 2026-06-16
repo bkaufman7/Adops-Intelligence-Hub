@@ -112,6 +112,19 @@ function hideArchivedTabs() {
   });
 }
 
+function archiveRetiredDashboardTabs() {
+  return withRunLogging_('archiveRetiredDashboardTabs', function () {
+    const archived = archiveTabsByName_(getRetiredDashboardTabNames_(), 'retired_');
+    const hidden = hideArchivedTabsByPrefix_('retired_');
+    return {
+      archivedCount: archived.length,
+      archivedTabs: archived,
+      hiddenCount: hidden.length,
+      hiddenTabs: hidden
+    };
+  });
+}
+
 function seedDataContractSheet_() {
   clearAndWriteTable_(
     SHEETS.DATA_CONTRACT,
@@ -148,11 +161,12 @@ function seedReadmeSheet_() {
 
 function seedInstructionsSheet_() {
   clearAndWriteTable_(SHEETS.INSTRUCTIONS, ['Topic', 'Instruction'], [
-    ['What this project does', 'Aggregates normalized issue exports, normalizes, summarizes, and trends cross-system intelligence.'],
+    ['What this project does', 'Aggregates normalized issue exports, normalizes, summarizes, scores, and trends cross-system intelligence.'],
     ['What this project does not do', 'Does not parse raw vendor attachments and does not replace source-system detection logic.'],
-    ['Refresh flow', 'Run Refresh Network Mapping then Refresh Source Exports then Run All Summaries.'],
-    ['Weekly summary', 'Run Run Weekly Summary to email the high-level report to configured recipients.'],
-    ['Backfill', 'Set date range in Backfill_Control then run Start Historical Backfill and Continue Historical Backfill.'],
+    ['Refresh flow', 'Use Refresh Baseline + Full Refresh for the full presentation-ready rebuild.'],
+    ['Dashboard flow', 'Start with Mission_Control, then Leadership_Briefing_View, Scorecard_Reps, Scorecard_Advertisers, and Scorecard_Campaigns.'],
+    ['Data quality', 'Use Data_Quality to confirm source freshness, mapping completeness, baseline coverage, and run warnings.'],
+    ['Thresholds', 'Use Thresholds to review the current dynamic scoring bands derived from incoming data.'],
     ['Dedupe behavior', 'Exact full-row hash only in v1.'],
     ['Mapping behavior', 'Missing mapping does not block event ingestion; mismatches are logged in Run_Log.']
   ]);
@@ -257,21 +271,19 @@ function seedDataSheets_(preserveAdminData) {
   clearAndWriteTable_(SHEETS.SUMMARY_BY_ISSUE_TYPE, ['Issue Flags', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.EXECUTIVE_SNAPSHOT, ['Section', 'Metric', 'Value', 'Status'], []);
   clearAndWriteTable_(SHEETS.PRESENTATION_VIEW, ['Leadership Snapshot'], []);
-  clearAndWriteTable_(SHEETS.BILLING_RISK_METER, ['Risk Segment', 'Current Severity Score', 'MTD Severity Score', 'Status'], []);
-  clearAndWriteTable_(SHEETS.TOP_RISK_MOVERS, ['Entity Type', 'Entity Name', 'Score Delta (30d)', 'Current Score', 'Owner', 'Status'], []);
-  clearAndWriteTable_(SHEETS.REP_WORKLOAD_LEADERBOARD, ['Rep', 'Live Placements', 'Flagged Placements', 'Severity Score', 'Workload Index', 'Status'], []);
-  clearAndWriteTable_(SHEETS.ADVERTISER_DISTRIBUTION, ['Grade Band', 'Advertiser Count', 'Share %', 'Notes'], []);
-  clearAndWriteTable_(SHEETS.NETWORK_HEATMAP, ['Network', 'Severity Score', 'Flagged %', 'Trend (30d)', 'Status'], []);
-  clearAndWriteTable_(SHEETS.PIPELINE_HEALTH, ['Check', 'Value', 'Status', 'Last Updated'], []);
-  clearAndWriteTable_(SHEETS.OWNER_ACTION_QUEUE, ['Priority', 'Owner', 'Entity Type', 'Entity Name', 'Issue', 'Due Date', 'Status'], []);
   clearAndWriteTable_(SHEETS.NETWORK_GRADING, ['Network Name', 'Total Issues (All Time)', 'Unique Placements', 'Issues Per Placement', 'Grade', 'Trend', 'Last 7 Days', 'Last 30 Days', 'Avg Issues Per Day (30d)'], []);
   clearAndWriteTable_(SHEETS.GRADING_METHODOLOGY, ['Section', 'Metric', 'Value', 'Notes'], []);
   clearAndWriteTable_(SHEETS.REP_GRADING, ['AdOps Rep Performance Grading'], []);
   clearAndWriteTable_(SHEETS.REP_GRADING_DIAGNOSTIC, ['Rep Issue Density Diagnostic'], []);
   clearAndWriteTable_(SHEETS.ADVERTISER_GRADING, ['Advertiser Performance Grading'], []);
+  clearAndWriteTable_(SHEETS.CAMPAIGN_GRADING, ['Campaign Performance Grading'], []);
+  clearAndWriteTable_(SHEETS.THRESHOLDS, ['Entity Type', 'Band', 'Min Flagged %', 'Max Flagged %', 'Source', 'Notes'], []);
+  clearAndWriteTable_(SHEETS.DATA_QUALITY, ['Category', 'Metric', 'Value', 'Status', 'Notes'], []);
   clearAndWriteTable_(SHEETS.UNMAPPED_NETWORKS, ['Unmapped Networks'], []);
+  clearAndWriteTable_(SHEETS.TREND_DAILY, ['Event Date', 'Source Project', 'Issue Count', 'Unique Flagged Placements'], []);
   clearAndWriteTable_(SHEETS.TREND_WEEKLY, ['Event Week', 'Source Project', 'Issue Count'], []);
   clearAndWriteTable_(SHEETS.TREND_MONTHLY, ['Event Month', 'Source Project', 'Issue Count'], []);
+  clearAndWriteTable_(SHEETS.TREND_ALL_TIME, ['Scope', 'Source Project', 'Issue Count', 'Unique Flagged Placements', 'Unique Advertisers', 'Unique Campaigns', 'Unique Reps'], []);
 
   if (preserveAdminData && sheetHasDataBeyondHeader_(SHEETS.RUN_LOG)) {
     ensureTableHeaders_(SHEETS.RUN_LOG, ['Timestamp', 'Action', 'Status', 'Message', 'Context']);
@@ -284,15 +296,15 @@ function seedDataSheets_(preserveAdminData) {
 
 function writeTabLegendSheet_() {
   var rows = [
-    ['🟢 Green',      'Leadership',  'Mission Control, Leadership Briefing, Billing Risk Meter, Top Risk Movers', 'Audience: leadership / stakeholders'],
-    ['🟣 Purple',     'Scorecards',  'Rep, Advertiser, Network, Methodology, Diagnostic', 'Audience: leadership + ops managers'],
-    ['🟠 Orange',     'Rollups',     'By Source, By Network, By Issue Type', 'Audience: ops + leadership'],
-    ['🔵 Teal',       'Trends',      'Weekly and Monthly trend monitors', 'Audience: ops / leadership'],
-    ['⚫ Grey',       'Data Core',   'Raw events, normalized ledger, baseline, imported summaries', 'Internal source data layers'],
-    ['🟡 Yellow',     'Operations',  'Owner action queue, unmapped entities, workload leaderboard, pipeline health', 'Operational execution tabs'],
-    ['🔵 Blue',       'Config / Admin','Config, mapping, recipients, accounts, backfill control, UI control', 'Internal configuration'],
-    ['🔴 Red',        'System',      'Run Log', 'Internal execution history'],
-    ['🩶 Light Grey', 'Reference',   'README, Instructions, Architecture Map, Data Contract, Tab Legend', 'Internal documentation']
+    ['Green', 'Presentation', 'Mission Control, Leadership Briefing', 'Audience: Ben-led leadership readout'],
+    ['Purple', 'Scorecards', 'Rep, Advertiser, Campaign, Network, Methodology, Diagnostic', 'Audience: performance and workload review'],
+    ['Yellow', 'Quality', 'Data Quality, Unmapped Entities, Thresholds', 'Audience: trust and scoring checks'],
+    ['Orange', 'Rollups', 'By Source, By Network, By Issue Type', 'Audience: supporting detail'],
+    ['Teal', 'Trends', 'Daily, Weekly, Monthly, All-Time trend monitors', 'Audience: movement over time'],
+    ['Grey', 'Data Core', 'Raw events, normalized ledger, baseline, imported summaries', 'Internal source data layers'],
+    ['Blue', 'Config / Admin', 'Config, mapping, recipients, accounts, backfill control, UI control', 'Internal configuration'],
+    ['Red', 'System', 'Run Log', 'Internal execution history'],
+    ['Light Grey', 'Reference', 'README, Instructions, Architecture Map, Data Contract, Tab Legend', 'Internal documentation']
   ];
   clearAndWriteTable_(SHEETS.TAB_LEGEND, ['Color', 'Group', 'Tabs', 'Notes'], rows);
 }
@@ -302,30 +314,29 @@ function organizeSheetTabs() {
 
   // Tab order: left to right by audience/purpose
   const TAB_ORDER = [
-    // Leadership (green)
+    // Presentation (green)
     SHEETS.EXECUTIVE_SNAPSHOT,
     SHEETS.PRESENTATION_VIEW,
-    SHEETS.BILLING_RISK_METER,
-    SHEETS.TOP_RISK_MOVERS,
-    // Operations (yellow)
-    SHEETS.OWNER_ACTION_QUEUE,
-    SHEETS.REP_WORKLOAD_LEADERBOARD,
-    SHEETS.PIPELINE_HEALTH,
-    SHEETS.NETWORK_HEATMAP,
-    SHEETS.ADVERTISER_DISTRIBUTION,
     // Grading (purple)
     SHEETS.REP_GRADING,
     SHEETS.ADVERTISER_GRADING,
+    SHEETS.CAMPAIGN_GRADING,
     SHEETS.NETWORK_GRADING,
     SHEETS.REP_GRADING_DIAGNOSTIC,
     SHEETS.GRADING_METHODOLOGY,
+    // Quality (yellow)
+    SHEETS.DATA_QUALITY,
+    SHEETS.THRESHOLDS,
+    SHEETS.UNMAPPED_NETWORKS,
     // Summaries (orange)
     SHEETS.SUMMARY_BY_SYSTEM,
     SHEETS.SUMMARY_BY_NETWORK,
     SHEETS.SUMMARY_BY_ISSUE_TYPE,
     // Trends (teal)
+    SHEETS.TREND_DAILY,
     SHEETS.TREND_WEEKLY,
     SHEETS.TREND_MONTHLY,
+    SHEETS.TREND_ALL_TIME,
     // Raw / operational data (grey)
     SHEETS.RAW_IMPORTED_EVENTS,
     SHEETS.NORMALIZED_LEDGER,
@@ -336,7 +347,6 @@ function organizeSheetTabs() {
     SHEETS.NETWORK_MAPPING,
     SHEETS.WEEKLY_RECIPIENTS,
     SHEETS.PROJECT_ACCOUNTS,
-    SHEETS.UNMAPPED_NETWORKS,
     SHEETS.BACKFILL_CONTROL,
     SHEETS.UI_CONTROL,
     // System (red)
@@ -352,23 +362,21 @@ function organizeSheetTabs() {
   const TAB_COLORS = {
     [SHEETS.EXECUTIVE_SNAPSHOT]:        '#34A853',  // green – leadership
     [SHEETS.PRESENTATION_VIEW]:         '#34A853',
-    [SHEETS.BILLING_RISK_METER]:        '#34A853',
-    [SHEETS.TOP_RISK_MOVERS]:           '#34A853',
-    [SHEETS.OWNER_ACTION_QUEUE]:        '#F4B400',  // yellow – operations
-    [SHEETS.REP_WORKLOAD_LEADERBOARD]:  '#F4B400',
-    [SHEETS.PIPELINE_HEALTH]:           '#F4B400',
-    [SHEETS.NETWORK_HEATMAP]:           '#F4B400',
-    [SHEETS.ADVERTISER_DISTRIBUTION]:   '#F4B400',
     [SHEETS.REP_GRADING]:               '#7B68EE',  // purple – grading
     [SHEETS.ADVERTISER_GRADING]:        '#7B68EE',
+    [SHEETS.CAMPAIGN_GRADING]:          '#7B68EE',
     [SHEETS.NETWORK_GRADING]:           '#7B68EE',
     [SHEETS.REP_GRADING_DIAGNOSTIC]:    '#9E7FD4',  // lighter purple – grading support
     [SHEETS.GRADING_METHODOLOGY]:       '#9E7FD4',
+    [SHEETS.DATA_QUALITY]:              '#F4B400',
+    [SHEETS.THRESHOLDS]:                '#F4B400',
     [SHEETS.SUMMARY_BY_SYSTEM]:         '#E69138',  // orange – summaries
     [SHEETS.SUMMARY_BY_NETWORK]:        '#E69138',
     [SHEETS.SUMMARY_BY_ISSUE_TYPE]:     '#E69138',
+    [SHEETS.TREND_DAILY]:               '#2BBCB4',
     [SHEETS.TREND_WEEKLY]:              '#2BBCB4',  // teal – trends
     [SHEETS.TREND_MONTHLY]:             '#2BBCB4',
+    [SHEETS.TREND_ALL_TIME]:            '#2BBCB4',
     [SHEETS.RAW_IMPORTED_EVENTS]:       '#9E9E9E',  // grey – raw data
     [SHEETS.NORMALIZED_LEDGER]:         '#9E9E9E',
     [SHEETS.IMPORTED_NETWORK_SUMMARIES]:'#9E9E9E',
@@ -377,7 +385,7 @@ function organizeSheetTabs() {
     [SHEETS.NETWORK_MAPPING]:           '#4A90D9',
     [SHEETS.WEEKLY_RECIPIENTS]:         '#4A90D9',
     [SHEETS.PROJECT_ACCOUNTS]:          '#4A90D9',
-    [SHEETS.UNMAPPED_NETWORKS]:         '#4A90D9',
+    [SHEETS.UNMAPPED_NETWORKS]:         '#F4B400',
     [SHEETS.BACKFILL_CONTROL]:          '#4A90D9',
     [SHEETS.UI_CONTROL]:                '#4A90D9',
     [SHEETS.RUN_LOG]:                   '#E53935',  // red – system log
@@ -426,9 +434,15 @@ function archiveLegacyDataReportTabs_(prefix) {
   const archivePrefix = String(prefix || 'archive_');
   const ss = SpreadsheetApp.getActive();
   const legacyDataTabs = getLegacyDataReportTabNames_();
+  return archiveTabsByName_(legacyDataTabs, archivePrefix);
+}
+
+function archiveTabsByName_(tabNames, prefix) {
+  const archivePrefix = String(prefix || 'archive_');
+  const ss = SpreadsheetApp.getActive();
   const renamed = [];
 
-  legacyDataTabs.forEach(function (name) {
+  (tabNames || []).forEach(function (name) {
     const sheet = ss.getSheetByName(name);
     if (!sheet) {
       return;
@@ -443,6 +457,18 @@ function archiveLegacyDataReportTabs_(prefix) {
   });
 
   return renamed;
+}
+
+function getRetiredDashboardTabNames_() {
+  return [
+    SHEETS.BILLING_RISK_METER,
+    SHEETS.TOP_RISK_MOVERS,
+    SHEETS.REP_WORKLOAD_LEADERBOARD,
+    SHEETS.ADVERTISER_DISTRIBUTION,
+    SHEETS.NETWORK_HEATMAP,
+    SHEETS.PIPELINE_HEALTH,
+    SHEETS.OWNER_ACTION_QUEUE
+  ];
 }
 
 function hideArchivedTabsByPrefix_(prefix) {

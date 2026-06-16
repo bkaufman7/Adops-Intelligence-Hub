@@ -31,6 +31,39 @@ function buildAdvertiserGrading() {
   });
 }
 
+function buildCampaignGrading() {
+  return withRunLogging_('buildCampaignGrading', function () {
+    return buildCampaignScorecard_(readTable_(SHEETS.NORMALIZED_LEDGER), buildLatestLivePlacementSet_());
+  });
+}
+
+function buildThresholds() {
+  return withRunLogging_('buildThresholds', function () {
+    return buildThresholds_(readTable_(SHEETS.NORMALIZED_LEDGER), buildLatestLivePlacementSet_());
+  });
+}
+
+function buildDataQuality() {
+  return withRunLogging_('buildDataQuality', function () {
+    return buildDataQuality_(readTable_(SHEETS.NORMALIZED_LEDGER), buildLatestLivePlacementSet_());
+  });
+}
+
+function rebuildDashboardsAndScorecards() {
+  return withRunLogging_('rebuildDashboardsAndScorecards', function () {
+    const result = {};
+
+    result.buildSummariesCore = buildSummariesCore_();
+    result.buildTrends = buildTrends_();
+    result.buildNetworkGrading = buildNetworkGrading_();
+    result.buildExecutiveArtifacts = buildExecutiveArtifacts_();
+    result.buildRepGrading = buildRepGrading_();
+    result.buildAdvertiserGrading = buildAdvertiserGrading_();
+
+    return result;
+  });
+}
+
 function setupDailyTrigger() {
   // Backward-compatible wrapper for existing menu/actions.
   return configureAutomationTriggers();

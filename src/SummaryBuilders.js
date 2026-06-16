@@ -24,6 +24,7 @@ function buildExecutiveArtifacts_() {
     const liveCoverage = buildLatestLivePlacementSet_();
 
     buildExecutiveSnapshot_(rows, liveCoverage);
+    buildDashboardSupportArtifacts_(rows, liveCoverage);
     try {
       // Presentation view is non-critical for pipeline completeness.
       // If Sheets is temporarily busy, keep core summaries/grading successful.
@@ -44,6 +45,7 @@ function buildExecutiveSnapshotOnly_() {
     const liveCoverage = buildLatestLivePlacementSet_();
 
     buildExecutiveSnapshot_(rows, liveCoverage);
+    buildDashboardSupportArtifacts_(rows, liveCoverage);
 
     return {
       normalizedRows: rows.length,
@@ -288,12 +290,17 @@ function buildExecutiveSnapshot_(rows, liveCoverage) {
   const uniqueReps = {};
   const uniqueIssues = {};
   const flaggedPlacementsAll = {};
+  const flaggedByRep = {};
+  const flaggedByAdvertiser = {};
+  const flaggedByCampaign = {};
+  const flaggedByNetwork = {};
   const issueByType = {};
 
   rows.forEach(function (row) {
     const networkName = String(row['Network Name'] || '').trim() || 'Unknown';
     const advertiser = String(row['Advertiser'] || '').trim() || 'Unknown';
     const repName = String(row['Account REP OPS'] || '').trim() || 'Unassigned';
+    const campaign = String(row['Campaign'] || '').trim() || 'Unknown';
     const placementId = String(row['Placement ID'] || '').trim();
     const issueType = String(row['Issue Type'] || row['Issue Flags'] || 'Unknown').trim() || 'Unknown';
     uniqueNetworks[networkName] = true;
@@ -305,6 +312,11 @@ function buildExecutiveSnapshot_(rows, liveCoverage) {
     if (placementId) {
       flaggedPlacementsAll[placementId] = true;
     }
+
+    addGroupedPlacementSignal_(flaggedByRep, repName, placementId);
+    addGroupedPlacementSignal_(flaggedByAdvertiser, advertiser, placementId);
+    addGroupedPlacementSignal_(flaggedByCampaign, campaign, placementId);
+    addGroupedPlacementSignal_(flaggedByNetwork, networkName, placementId);
   });
 
   const resolvedLiveCoverage = liveCoverage || { snapshotDate: '', byRep: {}, allLivePlacements: {} };
@@ -341,6 +353,26 @@ function buildExecutiveSnapshot_(rows, liveCoverage) {
   rowsOut.push(['', 'Summary_By_Network Buckets', countKeys_(groupCount_(rows, 'Network Name')), 'Info']);
   rowsOut.push(['', 'Summary_By_Issue_Type Buckets', countKeys_(groupCount_(rows, 'Issue Flags')), 'Info']);
 
+  rowsOut.push(['Top Risk Reps', '', '', '']);
+  topGroupedPlacementRows_(flaggedByRep, 5).forEach(function (item) {
+    rowsOut.push(['', item.name, item.count + ' flagged placements', item.count ? 'Watch' : 'Good']);
+  });
+
+  rowsOut.push(['Top Risk Advertisers', '', '', '']);
+  topGroupedPlacementRows_(flaggedByAdvertiser, 5).forEach(function (item) {
+    rowsOut.push(['', item.name, item.count + ' flagged placements', item.count ? 'Watch' : 'Good']);
+  });
+
+  rowsOut.push(['Top Risk Campaigns', '', '', '']);
+  topGroupedPlacementRows_(flaggedByCampaign, 5).forEach(function (item) {
+    rowsOut.push(['', item.name, item.count + ' flagged placements', item.count ? 'Watch' : 'Good']);
+  });
+
+  rowsOut.push(['Top Risk Networks', '', '', '']);
+  topGroupedPlacementRows_(flaggedByNetwork, 5).forEach(function (item) {
+    rowsOut.push(['', item.name, item.count + ' flagged placements', item.count ? 'Watch' : 'Good']);
+  });
+
   clearAndWriteTable_(SHEETS.EXECUTIVE_SNAPSHOT, ['Section', 'Metric', 'Value', 'Status'], rowsOut);
   formatExecutiveSnapshot_();
 }
@@ -352,16 +384,25 @@ function buildPresentationView_(rows, liveCoverage) {
   const uniqueNetworks = {};
   const uniqueAdvertisers = {};
   const uniqueReps = {};
+  const flaggedByRep = {};
+  const flaggedByAdvertiser = {};
+  const flaggedByCampaign = {};
 
   rows.forEach(function (row) {
     const placementId = String(row['Placement ID'] || '').trim();
+    const repName = String(row['Account REP OPS'] || '').trim() || 'Unassigned';
+    const advertiser = String(row['Advertiser'] || '').trim() || 'Unknown';
+    const campaign = String(row['Campaign'] || '').trim() || 'Unknown';
     if (placementId) {
       flaggedPlacementsAll[placementId] = true;
     }
 
     uniqueNetworks[String(row['Network Name'] || '').trim() || 'Unknown'] = true;
-    uniqueAdvertisers[String(row['Advertiser'] || '').trim() || 'Unknown'] = true;
-    uniqueReps[String(row['Account REP OPS'] || '').trim() || 'Unassigned'] = true;
+    uniqueAdvertisers[advertiser] = true;
+    uniqueReps[repName] = true;
+    addGroupedPlacementSignal_(flaggedByRep, repName, placementId);
+    addGroupedPlacementSignal_(flaggedByAdvertiser, advertiser, placementId);
+    addGroupedPlacementSignal_(flaggedByCampaign, campaign, placementId);
   });
 
   const totalLivePlacements = countKeys_(resolvedLiveCoverage.allLivePlacements || {});
@@ -394,10 +435,26 @@ function buildPresentationView_(rows, liveCoverage) {
     ['1) Core grading KPI = ' + formatPlacementRatio_(flaggedLivePlacements, totalLivePlacements)],
     ['2) Data coverage = ' + countKeys_(uniqueAdvertisers) + ' advertisers across ' + activeNetworkCoverage.count + ' active networks (' + activeNetworkCoverage.sourceLabel + ')'],
     ['3) Accountability coverage = ' + countKeys_(uniqueReps) + ' graded team members'],
-    ['4) View Rep_Grading for rep-level and network-level breakdown'],
-    ['5) View Executive_Snapshot for complete rollup and status markers']
+    ['4) Rep, advertiser, and campaign scorecards show the ranked workload/error-rate detail'],
+    ['5) Data_Quality shows whether the current dashboard is safe to present']
   ];
   sheet.getRange(4, 4, highlights.length, 1).setValues(highlights);
+
+  const topRows = [['Top Reps', 'Flagged Placements', 'Top Advertisers', 'Flagged Placements', 'Top Campaigns', 'Flagged Placements']];
+  const topReps = topGroupedPlacementRows_(flaggedByRep, 5);
+  const topAdvertisers = topGroupedPlacementRows_(flaggedByAdvertiser, 5);
+  const topCampaigns = topGroupedPlacementRows_(flaggedByCampaign, 5);
+  for (var i = 0; i < 5; i++) {
+    topRows.push([
+      topReps[i] ? topReps[i].name : '',
+      topReps[i] ? topReps[i].count : '',
+      topAdvertisers[i] ? topAdvertisers[i].name : '',
+      topAdvertisers[i] ? topAdvertisers[i].count : '',
+      topCampaigns[i] ? topCampaigns[i].name : '',
+      topCampaigns[i] ? topCampaigns[i].count : ''
+    ]);
+  }
+  sheet.getRange(12, 1, topRows.length, topRows[0].length).setValues(topRows);
 
   formatPresentationView_(sheet, flaggedPct);
 }
@@ -413,6 +470,35 @@ function getTopCountKey_(counts) {
     }
   });
   return topKey;
+}
+
+function addGroupedPlacementSignal_(groups, name, placementId) {
+  const key = String(name || 'Unknown').trim() || 'Unknown';
+  if (!groups[key]) {
+    groups[key] = {
+      issueCount: 0,
+      placements: {}
+    };
+  }
+
+  groups[key].issueCount += 1;
+  if (placementId) {
+    groups[key].placements[placementId] = true;
+  }
+}
+
+function topGroupedPlacementRows_(groups, limit) {
+  return Object.keys(groups || {}).map(function (name) {
+    const item = groups[name] || {};
+    const placementCount = countKeys_(item.placements || {});
+    return {
+      name: name,
+      count: placementCount || Number(item.issueCount || 0)
+    };
+  }).sort(function (a, b) {
+    if (b.count !== a.count) return b.count - a.count;
+    return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+  }).slice(0, limit || 5);
 }
 
 function formatExecutiveSnapshot_() {
@@ -480,8 +566,10 @@ function formatExecutiveSnapshot_() {
 function formatPresentationView_(sheet, flaggedPct) {
   sheet.setColumnWidth(1, 340);
   sheet.setColumnWidth(2, 180);
-  sheet.setColumnWidth(3, 40);
+  sheet.setColumnWidth(3, 260);
   sheet.setColumnWidth(4, 620);
+  sheet.setColumnWidth(5, 280);
+  sheet.setColumnWidth(6, 180);
   sheet.setFrozenRows(3);
 
   sheet.getRange(1, 1).setFontSize(16).setFontWeight('bold').setBackground('#1f4e78').setFontColor('#ffffff');
@@ -508,6 +596,8 @@ function formatPresentationView_(sheet, flaggedPct) {
   }
 
   sheet.getRange(5, 4, 5, 1).setWrap(true).setFontSize(10);
+  sheet.getRange(12, 1, 1, 6).setFontWeight('bold').setBackground('#cfe2f3').setFontColor('#073763');
+  sheet.getRange(13, 1, 5, 6).setFontSize(9).setWrap(true);
 }
 
 function getPrimaryGradingStatus_(flaggedPct) {
